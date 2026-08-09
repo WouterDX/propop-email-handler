@@ -1,0 +1,167 @@
+"""
+Gmail-laag, verdergebouwd op hetzelfde patroon als test_gmailaccess.py
+(zelfde manier van inloggen / token cachen), maar uitgebreid met:
+- volledige berichten ophalen (niet enkel metadata) en parsen
+- hele gespreksdraden (threads) ophalen als context
+- labels aanmaken/zetten (om te onthouden wat al verwerkt is)
+- concept-antwoorden (drafts) aanmaken, en optioneel verzenden
+"""
+from __future__ import annotations
+
+import base64
+import os
+from email.mime.text import MIMEText
+from typing import Optional
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+import config
+from email_parser import ParsedEmail, parse_raw_email
+
+
+def get_gmail_service():
+    """Zelfde login-logica als in test_gmailaccess.py, met uitgebreidere scopes
+    (zie config.GMAIL_SCOPES) zodat we ook labels en drafts kunnen beheren."""
+    creds = None
+
+    if os.path.exists(config.GMAIL_TOKEN_FILE):
+        creds = Credentials.from_authorized_user_file(
+            config.GMAIL_TOKEN_FILE, config.GMAIL_SCOPES
+        )
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                config.GMAIL_CREDENTIALS_FILE, config.GMAIL_SCOPES
+            )
+            creds = flow.run_local_server(port=0)
+
+        with open(config.GMAIL_TOKEN_FILE, "w") as token:
+            token.write(creds.to_json())
+
+    return build("gmail", "v1", credentials=creds)
+
+
+def list_new_message_ids(service, query: str = None, max_results: int = None) -> list[str]:
+    query = query or config.GMAIL_QUERY
+    max_results = max_results or config.GMAIL_MAX_RESULTS
+    results = (
+        service.users()
+        .messages()
+        .list(userId="me", q=query, maxResults=max_results)
+        .execute()
+    )
+    return [m["id"] for m in results.get("messages", [])]
+
+
+def get_parsed_message(service, msg_id: str) -> ParsedEmail:
+    raw = (
+        service.users()
+        .messages()
+        .get(userId="me", id=msg_id, format="raw")
+        .execute()
+    )
+    raw_bytes = base64.urlsafe_b64decode(raw["raw"])
+    parsed = parse_raw_email(raw_bytes)
+    parsed.gmail_msg_id = msg_id
+    parsed.thread_id = raw.get("threadId")
+    return parsed
+
+
+def get_thread_messages(service, thread_id: str, limit: int = None) -> list[ParsedEmail]:
+    """Haal een volledig gesprek op, oudste eerst, beperkt tot de laatste
+    `limit` berichten (zie config.THREAD_CONTEXT_LIMIT) zoals gevraagd in de
+    instructies (rekening houden met context, maar niet oneindig laten groeien)."""
+    limit = limit or config.THREAD_CONTEXT_LIMIT
+    thread = service.users().threads().get(userId="me", id=thread_id, format="raw").execute()
+    parsed_messages = []
+    for m in thread.get("messages", []):
+        raw_bytes = base64.urlsafe_b64decode(m["raw"])
+        parsed = parse_raw_email(raw_bytes)
+        parsed.gmail_msg_id = m["id"]
+        parsed.thread_id = thread_id
+        parsed_messages.append(parsed)
+    # Gmail geeft threads al chronologisch terug; we knippen enkel de staart af.
+    return parsed_messages[-limit:]
+
+
+# --- Labels -----------------------------------------------------------
+
+_label_cache: dict[str, str] = {}
+
+
+def ensure_label(service, label_name: str) -> str:
+    """Geef het label-ID terug, maak het label aan (incl. eventuele 'Propop/Xxx'
+    parent) als het nog niet bestaat."""
+    if label_name in _label_cache:
+        return _label_cache[label_name]
+
+    existing = service.users().labels().list(userId="me").execute().get("labels", [])
+    for lbl in existing:
+        if lbl["name"] == label_name:
+            _label_cache[label_name] = lbl["id"]
+            return lbl["id"]
+
+    created = (
+        service.users()
+        .labels()
+        .create(
+            userId="me",
+            body={
+                "name": label_name,
+                "labelListVisibility": "labelShow",
+                "messageListVisibility": "show",
+            },
+        )
+        .execute()
+    )
+    _label_cache[label_name] = created["id"]
+    return created["id"]
+
+
+def add_label(service, msg_id: str, label_name: str):
+    label_id = ensure_label(service, label_name)
+    service.users().messages().modify(
+        userId="me", id=msg_id, body={"addLabelIds": [label_id]}
+    ).execute()
+
+
+# --- Antwoorden ---------------------------------------------------------
+
+
+def _build_reply_mime(parsed_original: ParsedEmail, body_text: str) -> MIMEText:
+    subject = parsed_original.subject or ""
+    if not subject.lower().startswith("re:"):
+        subject = f"Re: {subject}"
+
+    mime = MIMEText(body_text, "plain", "utf-8")
+    mime["To"] = parsed_original.from_email
+    mime["Subject"] = subject
+    if parsed_original.message_id:
+        mime["In-Reply-To"] = parsed_original.message_id
+        refs = parsed_original.references + [parsed_original.message_id]
+        mime["References"] = " ".join(refs)
+    return mime
+
+
+def create_draft_reply(service, parsed_original: ParsedEmail, body_text: str) -> dict:
+    """Maak een CONCEPT-antwoord aan (wordt niet verstuurd). Dit is het
+    standaardgedrag van de app: een medewerker leest en verstuurt zelf."""
+    mime = _build_reply_mime(parsed_original, body_text)
+    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+    body = {"message": {"raw": raw, "threadId": parsed_original.thread_id}}
+    return service.users().drafts().create(userId="me", body=body).execute()
+
+
+def send_reply(service, parsed_original: ParsedEmail, body_text: str) -> dict:
+    """Verstuur meteen een antwoord. Enkel gebruikt als config.AUTO_SEND=true.
+    Gebruik dit met de nodige voorzichtigheid -- zie SETUP.md."""
+    mime = _build_reply_mime(parsed_original, body_text)
+    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+    body = {"raw": raw, "threadId": parsed_original.thread_id}
+    return service.users().messages().send(userId="me", body=body).execute()
