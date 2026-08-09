@@ -108,6 +108,7 @@ Afhankelijk van het soort klant zullen we ook andere informatie vragen. Deze wor
     - rolstoel (of andere beperkingen)
     - Speciale wensen
 
+#### Json schema voor deze informatie
 De *informatie bij reservaties* die geleverd wordt via email wordt per reservatie en in gestructureerde vorm in json formaat bewaard, en doel is steeds volledige informatie te bekomen (zie ook verder bij *nazorg via email voor reservaties*). 
 
 ### Nazorg via email voor reservaties

@@ -1,14 +1,14 @@
 """
-Centrale configuratie voor de Propop e-mailhandler.
+Central configuration for the Propop email handler.
 
-Alle instellingen worden bij voorkeur via een `.env` bestand aangeleverd
-(zie `.env.example`). Niets hier moet je normaal gezien hardcoded aanpassen,
-behalve als je de winkel-/prijsinformatie uit de instructietekst wijzigt.
+All settings are preferably provided via a `.env` file
+(see `.env.example`). Normally, nothing here needs to be hardcoded,
+except when you change store/pricing information from the instruction text.
 """
 import os
 from pathlib import Path
 
-# --- .env laden (optioneel, alleen als python-dotenv geinstalleerd is) ---
+# --- Load .env (optional, only if python-dotenv is installed) ---
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -16,11 +16,12 @@ except ImportError:
     pass
 
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
 
 # --- Gmail ---
-# We hebben meer nodig dan alleen "readonly" uit het testscript, want de
-# handler moet ook labels zetten en concept-antwoorden (drafts) aanmaken.
-# gmail.compose dekt drafts + verzenden, gmail.modify dekt labels/archiveren.
+# We need more than just "readonly" from the test script, because the
+# handler must also apply labels and create draft replies.
+# gmail.compose covers drafts + sending, gmail.modify covers labels/archiving.
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.modify",
@@ -29,76 +30,46 @@ GMAIL_SCOPES = [
 GMAIL_CREDENTIALS_FILE = os.getenv("GMAIL_CREDENTIALS_FILE", str(BASE_DIR / "credentials.json"))
 GMAIL_TOKEN_FILE = os.getenv("GMAIL_TOKEN_FILE", str(BASE_DIR / "token.json"))
 
-# Query om te bepalen welke mails er "nieuw te verwerken" zijn.
-# Standaard: alles in de inbox dat nog niet ons eigen "verwerkt"-label draagt.
-GMAIL_LABEL_HANDLED = os.getenv("GMAIL_LABEL_HANDLED", "Propop/Verwerkt")
-GMAIL_LABEL_NEEDS_HUMAN = os.getenv("GMAIL_LABEL_NEEDS_HUMAN", "Propop/NaZien")
+# Query used to determine which emails are "new to process".
+# Default: everything in inbox that does not yet have our own "handled" label.
+GMAIL_LABEL_HANDLED = os.getenv("GMAIL_LABEL_HANDLED", "Processed")
+GMAIL_LABEL_NEEDS_HUMAN = os.getenv("GMAIL_LABEL_NEEDS_HUMAN", "NeedsReview")
 GMAIL_QUERY = os.getenv(
     "GMAIL_QUERY",
     f"in:inbox -label:{GMAIL_LABEL_HANDLED.replace('/', '-')}",
 )
-# Hoeveel berichten er per run maximaal opgehaald worden.
+# Maximum number of messages fetched per run.
 GMAIL_MAX_RESULTS = int(os.getenv("GMAIL_MAX_RESULTS", "10"))
-# Hoeveel berichten van eenzelfde gesprek (thread) er als context meegegeven worden.
+# Number of messages from the same conversation (thread) included as context.
 THREAD_CONTEXT_LIMIT = int(os.getenv("THREAD_CONTEXT_LIMIT", "10"))
 
-# Veiligheidsklep: standaard maakt de app enkel CONCEPTEN (drafts) aan, en
-# verstuurt ze NOOIT automatisch. Pas dit pas aan naar "true" nadat je een
-# tijdje de concepten hebt nagelezen en vertrouwt.
+# Safety guard: by default, the app only creates DRAFTS and
+# NEVER sends automatically. Set this to "true" only after you have
+# reviewed drafts for a while and trust the behavior.
 AUTO_SEND = os.getenv("AUTO_SEND", "false").lower() == "true"
 
-# --- OpenRouter (AI-agent) ---
+# --- OpenRouter (AI agent) ---
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-# Aanbevolen model: goede prijs/kwaliteit voor NL-tekst -> structuur + korte
-# vriendelijke antwoorden, betrouwbare JSON-output. Zie SETUP.md voor
-# alternatieven en hoe je dit kan wijzigen zonder code aan te passen.
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-haiku-4.5")
-# Deze twee headers zijn niet verplicht maar aangeraden door OpenRouter zodat
-# jouw app correct herkend wordt in hun dashboard/rate-limits.
-OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "https://www.propop.be")
-OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "Propop e-mailhandler")
+# Recommended model: good price/quality for Dutch text -> structure + short,
+# friendly replies and reliable JSON output. See SETUP.md for
+# alternatives and how to change this without code changes.
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
+# These headers are optional; for local/dev usage, leaving SITE_URL empty is fine.
+# If set, it is sent as HTTP-Referer to OpenRouter.
+OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
+OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "myorg e-mailhandler")
 
-# --- Reservatielijst (momenteel een lokale JSON-mock, zie reservatielijst.py) ---
+# --- Reservation list (currently a local JSON mock, see reservatielijst.py) ---
 RESERVATIELIJST_FILE = os.getenv("RESERVATIELIJST_FILE", str(BASE_DIR / "data" / "reservations.json"))
 
-# --- Bedrijfsinformatie die de AI-agent letterlijk moet gebruiken ---
-# (Overgenomen uit instructions_email_handler.md zodat bedragen/rekeningnummers
-# nooit door het taalmodel "verzonnen" worden.)
-CADEAUBON_IBAN = "BE41 0010 8855 4410"
-CADEAUBON_BIC = "GEBABEBB"
-CADEAUBON_REKENING_NAAM = "Propop vzw"
-CADEAUBON_VERZENDKOSTEN = 1.00
-
-VOORSTELLINGEN = [
-    {"titel": "Het Waait", "leeftijd": "0.5-3j", "aliassen": ["het waait", "waait"]},
-    {"titel": "De Zandman", "leeftijd": "2-5j", "aliassen": ["zandman", "de zandman"]},
-    {"titel": "BeestIG", "leeftijd": "2-5j", "aliassen": ["beestig", "beest ig"]},
-    {"titel": "Stapel", "leeftijd": "2.5-5j", "aliassen": ["stapel"]},
-    {"titel": "Bouwstenen", "leeftijd": "2.5-5j", "aliassen": ["bouwstenen"]},
-    {"titel": "Onderonsje", "leeftijd": "2.5-5j", "aliassen": ["onderonsje"]},
-    {"titel": "De Taartendief", "leeftijd": "2.5-5j", "aliassen": ["taartendief", "de taartendief"]},
-    {"titel": "Kijkdoos", "leeftijd": "2.5-6j", "aliassen": ["kijkdoos"]},
-    {"titel": "Bip", "leeftijd": "3-7j", "aliassen": ["bip"]},
-    {"titel": "Graaf", "leeftijd": "3-8j", "aliassen": ["graaf"]},
-    {"titel": "Sinterklaas Kapoentje", "leeftijd": "3-8j", "aliassen": ["sinterklaas kapoentje", "sinterklaas", "sint"]},
-    {"titel": "Bo kan alles", "leeftijd": "4-7j", "aliassen": ["bo kan alles", "bo"]},
-    {"titel": "Hoofd vol..#?!.", "leeftijd": "4-10j", "aliassen": ["hoofd vol", "hoofdvol"]},
-    {"titel": "Kleine Held", "leeftijd": "4-10j", "aliassen": ["kleine held"]},
-    {"titel": "Het lelijke eendje", "leeftijd": "4-10j", "aliassen": ["het lelijke eendje", "lelijke eendje"]},
-    {"titel": "De Kakmadam", "leeftijd": "familie", "aliassen": ["de kakmadam", "kakmadam"]},
-    {"titel": "Het meisje met de zwavelstokjes", "leeftijd": "4-10j", "aliassen": ["het meisje met de zwavelstokjes", "zwavelstokjes"]},
-    {"titel": "De Stoefpotloden", "leeftijd": "4-10j", "aliassen": ["de stoefpotloden", "stoefpotloden"]},
-    {"titel": "Control X", "leeftijd": "8-12j", "aliassen": ["control x", "control-x", "controlx"]},
-    {"titel": "Hee man!", "leeftijd": "6+ & volwassenen", "aliassen": ["hee man", "heeman"]},
-]
-
-RESERVEREN_URLS = {
-    "familie_poppenzaal": "https://www.propop.be/de-poppenzaal/familievoorstellingen/reserveren.html",
-    "school_poppenzaal": "https://www.propop.be/de-poppenzaal/schoolvoorstellingen/reserveren-schoolvoorstellingen.html",
-    "verplaatsing": "https://www.propop.be/theater-propop/reserveren-op-verplaatsing.html",
-}
-
-CADEAUBON_URL = "https://www.propop.be/de-poppenzaal/cadeaubon-voor-familievoorstellingen.html"
+# --- Company data (JSON file, not hardcoded in source code) ---
+# Copy data/company_data_example.json to data/company_data.json and fill in
+# your real business data.
+COMPANY_DATA_FILE = os.getenv(
+    "COMPANY_DATA_FILE",
+    str(PROJECT_ROOT / "data" / "company_data.json"),
+)
+COMPANY_DATA_EXAMPLE_FILE = str(PROJECT_ROOT / "data" / "company_data_example.json")
 
 INSTRUCTIONS_FILE = os.getenv("INSTRUCTIONS_FILE", str(BASE_DIR / "instructions_email_handler.md"))

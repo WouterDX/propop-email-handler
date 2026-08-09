@@ -15,6 +15,7 @@ locally, on top of what `test_gmailaccess.py` already did.
 | `ai_agent.py` | Calls OpenRouter to classify + write a reply |
 | `main.py` | Connects everything: fetches emails, calls AI, creates drafts |
 | `instructions_email_handler.md` | Your business instructions (unchanged) — passed literally to the AI |
+| `data/company_data_example.json` | Anonymized example of structured company data (shows, URLs, gift voucher info) |
 
 ## 1. Python environment
 Install pixi (follow online instructions), then:
@@ -128,13 +129,27 @@ To modify your model, just change `OPENROUTER_MODEL` in `.env`, no code required
 
 Track usage at https://openrouter.ai/activity.
 
-## 4. First test run (recommended: dry-run)
+## 4. Company data JSON (required)
+
+Business-specific data is stored at two places:
+-  `data/instructions_email_handler.md`: instructions that can be read by a human or ai
+-  `data/company_data.json`: data for the company in a clear structure, that can be read by computer software.
+
+The easiest is to read the first file with instructions, and modify it for your purposes (this can be done in any language you choose).
+Once you are done, create the second file as follows:
+
+1. Copy the example file `data/company_data_example.json` to `data/company_data.json`:   
+2. Ask an AI chatbot like chatgpt to modify `data/company_data.json` using `data/instructions_email_handler.md`. This is an easy job for an AI!
+3. Compare both files to see if the new output is correct.
+4. Optional: if you store this file elsewhere, set `COMPANY_DATA_FILE` in `.env`.
+
+## 5. First test run (recommended: dry-run)
 
 Start with a "dry run": the app reads your mailbox and shows what it WOULD do,
 without changing anything in Gmail or in the reservation list.
 
 ```bash
-python main.py --dry-run --max 3
+python src/main.py --dry-run --max 3
 ```
 
 On first run, a browser window opens so you can sign in to your
@@ -144,16 +159,16 @@ Review the JSON output: is the classification correct? Is the proposed reply
 appropriate? If needed, adjust `instructions_email_handler.md` (the AI reads
 this file again on every run) and try again.
 
-## 5. Run live — with drafts, not auto-send
+## 6. Run live — with drafts, not auto-send
 
 Once you trust the dry run:
 
 ```bash
-python main.py
+python src/main.py
 ```
 
 The app now actually creates **draft replies** in Gmail and labels processed
-emails with `Propop/Verwerkt` (and `Propop/NaZien` for emails that should be
+emails with `AI_Processed` (and `AI_Needs_Review` for emails that should be
 reviewed manually — for example custom requests or cases where the AI is not
 confident enough). **Nothing is sent automatically yet.**
 A staff member reviews drafts in Gmail and sends them manually.
@@ -162,12 +177,12 @@ Only after you have confidence for a while should you set `AUTO_SEND=true`
 in `.env` so replies are sent immediately. Do this only after several weeks
 of reviewing drafts.
 
-## 6. Run repeatedly
+## 7. Run repeatedly
 
 It's recommended to run this script manually once every day for incoming emails.
 If you do want more automation, you'll have to search information on crontab (mac/linux) or integration tools like n8n. 
 
-## 7. Reservation list — currently a local test version
+## 8. Reservation list — currently a local test version
 
 `reservatielijst.py` currently contains a simple, **local** implementation
 (`JsonFileReservatieLijst`) that writes reservations to
@@ -184,7 +199,7 @@ To connect this to the real reservation system on the website:
 
 Nothing else in the app needs to change for this.
 
-## 8. Security & privacy — short overview
+## 9. Security & privacy — short overview
 
 - `.env`, `credentials.json`, and `token.json` contain secret keys —
   **never** commit them to git (they are in `.gitignore`).

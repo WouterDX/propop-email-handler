@@ -1,10 +1,10 @@
 """
-Gmail-laag, verdergebouwd op hetzelfde patroon als test_gmailaccess.py
-(zelfde manier van inloggen / token cachen), maar uitgebreid met:
-- volledige berichten ophalen (niet enkel metadata) en parsen
-- hele gespreksdraden (threads) ophalen als context
-- labels aanmaken/zetten (om te onthouden wat al verwerkt is)
-- concept-antwoorden (drafts) aanmaken, en optioneel verzenden
+Gmail layer, built on the same pattern as test_gmailaccess.py
+(same login / token caching flow), but extended with:
+- fetching and parsing full messages (not only metadata)
+- fetching full conversation threads as context
+- creating/applying labels (to track what is already processed)
+- creating draft replies, and optionally sending
 """
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ from email_parser import ParsedEmail, parse_raw_email
 
 
 def get_gmail_service():
-    """Zelfde login-logica als in test_gmailaccess.py, met uitgebreidere scopes
-    (zie config.GMAIL_SCOPES) zodat we ook labels en drafts kunnen beheren."""
+    """Same login logic as in test_gmailaccess.py, with broader scopes
+    (see config.GMAIL_SCOPES) so we can also manage labels and drafts."""
     creds = None
 
     if os.path.exists(config.GMAIL_TOKEN_FILE):
@@ -74,9 +74,9 @@ def get_parsed_message(service, msg_id: str) -> ParsedEmail:
 
 
 def get_thread_messages(service, thread_id: str, limit: int = None) -> list[ParsedEmail]:
-    """Haal een volledig gesprek op, oudste eerst, beperkt tot de laatste
-    `limit` berichten (zie config.THREAD_CONTEXT_LIMIT) zoals gevraagd in de
-    instructies (rekening houden met context, maar niet oneindig laten groeien)."""
+    """Fetch a full conversation, oldest first, limited to the last
+    `limit` messages (see config.THREAD_CONTEXT_LIMIT) as requested in the
+    instructions (use context, but avoid unbounded growth)."""
     limit = limit or config.THREAD_CONTEXT_LIMIT
     thread = service.users().threads().get(userId="me", id=thread_id, format="raw").execute()
     parsed_messages = []
@@ -86,7 +86,7 @@ def get_thread_messages(service, thread_id: str, limit: int = None) -> list[Pars
         parsed.gmail_msg_id = m["id"]
         parsed.thread_id = thread_id
         parsed_messages.append(parsed)
-    # Gmail geeft threads al chronologisch terug; we knippen enkel de staart af.
+    # Gmail already returns threads chronologically; we only trim the tail.
     return parsed_messages[-limit:]
 
 
@@ -96,8 +96,8 @@ _label_cache: dict[str, str] = {}
 
 
 def ensure_label(service, label_name: str) -> str:
-    """Geef het label-ID terug, maak het label aan (incl. eventuele 'Propop/Xxx'
-    parent) als het nog niet bestaat."""
+    """Return the label ID; create the label (including optional 'Propop/Xxx'
+    parent) if it does not exist yet."""
     if label_name in _label_cache:
         return _label_cache[label_name]
 
@@ -131,7 +131,7 @@ def add_label(service, msg_id: str, label_name: str):
     ).execute()
 
 
-# --- Antwoorden ---------------------------------------------------------
+# --- Replies ---------------------------------------------------------
 
 
 def _build_reply_mime(parsed_original: ParsedEmail, body_text: str) -> MIMEText:
@@ -150,8 +150,8 @@ def _build_reply_mime(parsed_original: ParsedEmail, body_text: str) -> MIMEText:
 
 
 def create_draft_reply(service, parsed_original: ParsedEmail, body_text: str) -> dict:
-    """Maak een CONCEPT-antwoord aan (wordt niet verstuurd). Dit is het
-    standaardgedrag van de app: een medewerker leest en verstuurt zelf."""
+    """Create a DRAFT reply (not sent). This is the app's default behavior:
+    a staff member reviews and sends manually."""
     mime = _build_reply_mime(parsed_original, body_text)
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
     body = {"message": {"raw": raw, "threadId": parsed_original.thread_id}}
@@ -159,8 +159,8 @@ def create_draft_reply(service, parsed_original: ParsedEmail, body_text: str) ->
 
 
 def send_reply(service, parsed_original: ParsedEmail, body_text: str) -> dict:
-    """Verstuur meteen een antwoord. Enkel gebruikt als config.AUTO_SEND=true.
-    Gebruik dit met de nodige voorzichtigheid -- zie SETUP.md."""
+    """Send a reply immediately. Only used when config.AUTO_SEND=true.
+    Use with appropriate caution -- see SETUP.md."""
     mime = _build_reply_mime(parsed_original, body_text)
     raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
     body = {"raw": raw, "threadId": parsed_original.thread_id}

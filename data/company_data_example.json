@@ -1,0 +1,37 @@
+{
+  "company_name": "Example Puppet Theater",
+  "shows": [
+    {
+      "title": "Wind Song",
+      "audience_age": "0.5-3y",
+      "aliases": ["wind song", "wind"]
+    },
+    {
+      "title": "Sand Sleeper",
+      "audience_age": "2-5y",
+      "aliases": ["sand sleeper", "sleeper"]
+    },
+    {
+      "title": "Block Stories",
+      "audience_age": "2.5-6y",
+      "aliases": ["block stories", "blocks"]
+    },
+    {
+      "title": "Control Blue",
+      "audience_age": "8-12y",
+      "aliases": ["control blue", "blue control"]
+    }
+  ],
+  "reservation_urls": {
+    "family_puppet_theater": "https://www.example-theater.org/puppet-theater/family/reserve",
+    "school_puppet_theater": "https://www.example-theater.org/puppet-theater/schools/reserve",
+    "touring": "https://www.example-theater.org/touring/reserve"
+  },
+  "gift_voucher": {
+    "url": "https://www.example-theater.org/puppet-theater/gift-voucher",
+    "iban": "BE00 0000 0000 0000",
+    "bic": "EXAMPBEBB",
+    "account_name": "Example Theater vzw",
+    "shipping_cost_eur": 1.0
+  }
+}

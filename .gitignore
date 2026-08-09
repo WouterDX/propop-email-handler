@@ -6,3 +6,4 @@ token.json
 pixi.lock
 handler.log
 .env
+data/company_data.json

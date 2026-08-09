@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 from pydantic import ValidationError
@@ -28,6 +28,7 @@ from models import AgentResult, Reservation
 log = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT_CACHE: Optional[str] = None
+_COMPANY_DATA_CACHE: Optional[dict[str, Any]] = None
 
 
 def _load_instructions() -> str:
@@ -41,19 +42,54 @@ def _load_instructions() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _load_company_data() -> dict[str, Any]:
+    global _COMPANY_DATA_CACHE
+    if _COMPANY_DATA_CACHE is not None:
+        return _COMPANY_DATA_CACHE
+
+    path = Path(config.COMPANY_DATA_FILE)
+    if not path.exists():
+        raise FileNotFoundError(
+            "Company data JSON was not found at "
+            f"{path}. Copy {config.COMPANY_DATA_EXAMPLE_FILE} to this path "
+            "and fill in your real company data."
+        )
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in company data file {path}: {e}") from e
+
+    required_keys = {"company_name", "shows", "reservation_urls", "gift_voucher"}
+    missing_keys = required_keys - set(data.keys())
+    if missing_keys:
+        raise ValueError(
+            f"Company data file {path} is missing required keys: {sorted(missing_keys)}"
+        )
+
+    _COMPANY_DATA_CACHE = data
+    return _COMPANY_DATA_CACHE
+
+
 def build_system_prompt() -> str:
     global _SYSTEM_PROMPT_CACHE
     if _SYSTEM_PROMPT_CACHE:
         return _SYSTEM_PROMPT_CACHE
 
     instructions = _load_instructions()
+    company_data = _load_company_data()
+    company_name = company_data["company_name"]
+    shows_data = company_data["shows"]
+    reservation_urls = company_data["reservation_urls"]
+    gift_voucher = company_data["gift_voucher"]
+
     shows = "\n".join(
-        f"- {s['titel']} ({s['leeftijd']}) [aliassen: {', '.join(s['aliassen'])}]"
-        for s in config.VOORSTELLINGEN
+        f"- {s['title']} ({s['audience_age']}) [aliassen: {', '.join(s['aliases'])}]"
+        for s in shows_data
     )
 
     prompt = f"""
-Je bent de e-mailassistent van Propop, een kindertheater in Vlaanderen.
+Je bent de e-mailassistent van {company_name}, een kindertheater in Vlaanderen.
 Je helpt bij het verwerken van binnenkomende e-mails volgens onderstaande
 bedrijfsinstructies. Deze instructies zijn leidend -- verzin nooit
 prijzen, adressen, data of regels die er niet in staan.
@@ -66,16 +102,16 @@ Volledige lijst voorstellingen met doelgroepleeftijd en veelgebruikte aliassen:
 {shows}
 
 Nuttige links:
-- Reserveren familievoorstelling poppenzaal: {config.RESERVEREN_URLS['familie_poppenzaal']}
-- Reserveren schoolvoorstelling poppenzaal: {config.RESERVEREN_URLS['school_poppenzaal']}
-- Reserveren voorstelling op verplaatsing: {config.RESERVEREN_URLS['verplaatsing']}
-- Cadeaubon: {config.CADEAUBON_URL}
+- Reserveren familievoorstelling poppenzaal: {reservation_urls['family_puppet_theater']}
+- Reserveren schoolvoorstelling poppenzaal: {reservation_urls['school_puppet_theater']}
+- Reserveren voorstelling op verplaatsing: {reservation_urls['touring']}
+- Cadeaubon: {gift_voucher['url']}
 
 Cadeaubon-betaalgegevens (gebruik EXACT deze gegevens, verzin niets):
-- IBAN: {config.CADEAUBON_IBAN}
-- BIC: {config.CADEAUBON_BIC}
-- t.a.v.: {config.CADEAUBON_REKENING_NAAM}
-- Verzendkosten: {config.CADEAUBON_VERZENDKOSTEN:.2f} euro extra bovenop het bedrag van de bon(nen).
+- IBAN: {gift_voucher['iban']}
+- BIC: {gift_voucher['bic']}
+- t.a.v.: {gift_voucher['account_name']}
+- Verzendkosten: {float(gift_voucher['shipping_cost_eur']):.2f} euro extra bovenop het bedrag van de bon(nen).
 
 === JOUW TAAK ===
 Je krijgt:
@@ -185,14 +221,18 @@ def _call_openrouter(messages: list[dict]) -> str:
             "aan te maken op https://openrouter.ai/ en in je .env te zetten."
         )
 
+    headers = {
+        "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    if config.OPENROUTER_SITE_URL:
+        headers["HTTP-Referer"] = config.OPENROUTER_SITE_URL
+    if config.OPENROUTER_APP_NAME:
+        headers["X-Title"] = config.OPENROUTER_APP_NAME
+
     resp = requests.post(
         f"{config.OPENROUTER_BASE_URL}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": config.OPENROUTER_SITE_URL,
-            "X-Title": config.OPENROUTER_APP_NAME,
-        },
+        headers=headers,
         json={
             "model": config.OPENROUTER_MODEL,
             "messages": messages,
