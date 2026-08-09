@@ -2,7 +2,6 @@
 To run this repo, you must setup as follows:
 
 ## 1. Create a google cloud project in the organisation with the email you want to access.
-========================
 Go to http://console.cloud.google.com.
 
 Sign in with the Google account whose Gmail you want the program to read.
@@ -21,7 +20,6 @@ Select the new project.
 You don't need to attach a billing account for what we're doing.
 
 ## 2. Enable gmail api
-===================
 With your new project selected:
 
 Open APIs & Services → Library.
@@ -30,7 +28,6 @@ Open Gmail API.
 Click Enable.
 
 ## 3. Setup oauth credentials
-==========================
 Now go to:
 
 APIs & Services → Credentials
@@ -54,7 +51,6 @@ For Test users, add the Gmail account you're going to use.
 Then save.
 
 ## 4. Create desktop app
-=====================
 You probably get a hint that you should configure credentials, click it or go to API&Services/Credentials.
 Click:
 
@@ -77,7 +73,6 @@ Click Download JSON.
 Save the downloaded file in your project as credentials.json. Keep it secret so never push to your repo.
 
 ## 5. Run the test program for the first time.
-======================================
 When running python src/test_gmailaccess.py, the first time you'll be redirected to your browser. The browser must open in a window where a user of your organisation is logged in. If this is not correct, you can copy-paste the url from your console log in a browser that does have this access.
 
 After that, you're all set.
