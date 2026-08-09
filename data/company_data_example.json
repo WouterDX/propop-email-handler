@@ -1,5 +1,6 @@
 {
   "company_name": "Example Puppet Theater",
+  "company_building_name": "Example Puppet Hall",
   "shows": [
     {
       "title": "Wind Song",

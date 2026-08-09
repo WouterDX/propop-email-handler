@@ -32,7 +32,7 @@ import sys
 
 import config
 import gmail_client
-import reservatielijst as reservation_list_module
+import reservation_list as reservation_list_module
 from ai_agent import analyze_email
 from models import AgentResult, Reservation
 
@@ -64,21 +64,19 @@ def process_thread(service, reservation_list, thread_id: str, latest_msg_id: str
     latest = thread[-1]
     log.info("Processing conversation with %s | subject: %s", latest.from_email, latest.subject)
 
-    # We try to automatically determine which email address is "Propop itself"
-    # (the "To" address from the latest customer email) so we can indicate
-    # in the prompt who is the customer and who is Propop.
+    # We try to automatically determine which email address is the customer and which is our own address.    
     own_email_hint = latest.to.split(",")[0].strip() if latest.to else ""
 
     candidates = reservation_list.search(email=latest.from_email)
 
     try:
-        result: AgentResult = analyze_email(thread, candidates, own_email_hint)
+        result: AgentResult = analyze_email(thread, candidates, own_email_hint)        
     except Exception as e:
-        log.error("AI analysis failed for thread %s: %s", thread_id, e)
+        log.error("AI analysis failed for thread %s: %s", thread_id, e)        
         if not dry_run:
             gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_NEEDS_HUMAN)
             gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_HANDLED)
-        return
+        return        
 
     log.info(
         "  -> category=%s | ready_for_action=%s | action=%s | needs_human=%s | no_reply=%s",
@@ -87,7 +85,7 @@ def process_thread(service, reservation_list, thread_id: str, latest_msg_id: str
         result.reservatielijst_action,
         result.needs_human,
         result.no_reply_needed,
-    )
+    )    
 
     # --- Execute reservation-list action (if applicable) ---
     if not dry_run and result.ready_for_action and result.reservatielijst_action != "none":
@@ -130,6 +128,11 @@ def process_thread(service, reservation_list, thread_id: str, latest_msg_id: str
         print("=" * 70 + "\n")
         return
 
+    import code
+    code.interact(local=dict(locals(), **globals()))
+
+    
+
     if result.no_reply_needed or result.needs_human or not result.reply_email_nl.strip():
         if result.needs_human:
             gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_NEEDS_HUMAN)
@@ -152,22 +155,23 @@ def run(dry_run: bool = False, max_threads: int = None):
             "(In dry-run without a key, the AI call will also fail.)"
         )
 
-    service = gmail_client.get_gmail_service()
-    reservation_list = reservation_list_module.JsonFileReservatieLijst()
+    service = gmail_client.get_gmail_service()    
+    reservation_list = reservation_list_module.JsonFileReservationList()    
 
     msg_ids = gmail_client.list_new_message_ids(service)
-    log.info("Found: %d new/unprocessed messages.", len(msg_ids))
+    log.info("Found: %d new/unprocessed messages.", len(msg_ids))    
 
     seen_threads = set()
     processed = 0
     for msg_id in msg_ids:
         if max_threads is not None and processed >= max_threads:
             break
-        parsed = gmail_client.get_parsed_message(service, msg_id)
+        parsed = gmail_client.get_parsed_message(service, msg_id)        
         if parsed.thread_id in seen_threads:
             continue
         seen_threads.add(parsed.thread_id)
         process_thread(service, reservation_list, parsed.thread_id, msg_id, dry_run)
+
         processed += 1
 
     log.info("Done. %d conversation(s) processed.", processed)

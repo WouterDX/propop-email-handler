@@ -79,6 +79,7 @@ def build_system_prompt() -> str:
     instructions = _load_instructions()
     company_data = _load_company_data()
     company_name = company_data["company_name"]
+    company_building=company_data["company_building_name"]
     shows_data = company_data["shows"]
     reservation_urls = company_data["reservation_urls"]
     gift_voucher = company_data["gift_voucher"]
@@ -89,7 +90,7 @@ def build_system_prompt() -> str:
     )
 
     prompt = f"""
-Je bent de e-mailassistent van {company_name}, een kindertheater in Vlaanderen.
+Je bent de e-mailassistent van {company_name}, een kindertheater.
 Je helpt bij het verwerken van binnenkomende e-mails volgens onderstaande
 bedrijfsinstructies. Deze instructies zijn leidend -- verzin nooit
 prijzen, adressen, data of regels die er niet in staan.
@@ -102,8 +103,8 @@ Volledige lijst voorstellingen met doelgroepleeftijd en veelgebruikte aliassen:
 {shows}
 
 Nuttige links:
-- Reserveren familievoorstelling poppenzaal: {reservation_urls['family_puppet_theater']}
-- Reserveren schoolvoorstelling poppenzaal: {reservation_urls['school_puppet_theater']}
+- Reserveren familievoorstelling {company_building}: {reservation_urls['family_puppet_theater']}
+- Reserveren schoolvoorstelling {company_building}: {reservation_urls['school_puppet_theater']}
 - Reserveren voorstelling op verplaatsing: {reservation_urls['touring']}
 - Cadeaubon: {gift_voucher['url']}
 
@@ -125,7 +126,7 @@ markdown-codeblok), met exact deze velden:
 
 {{
   "category": een van "nieuwe_reservatie_volledig" | "nieuwe_reservatie_onduidelijk" | "annulering" | "wijziging" | "cadeaubon" | "bijwonen_voorstelling" | "maatwerk_overig" | "vervolg_overig",
-  "reservation_type": een van "verplaatsing" | "school_poppenzaal" | "familie_poppenzaal" | null,
+  "reservation_type": een van "verplaatsing" | "school_lokaal" | "familie_lokaal" | null,
   "extracted": {{ ... zoveel mogelijk van de velden uit het Reservation-schema hieronder, enkel wat je met vertrouwen uit de mail(len) kan afleiden ... }},
   "matched_reservation_id": "<id uit de kandidatenlijst, of null>",
   "ready_for_action": true/false,
@@ -139,9 +140,9 @@ markdown-codeblok), met exact deze velden:
 
 Reservation-schema (gebruik deze veldnamen exact in "extracted" waar van toepassing):
 {{
-  "type": "verplaatsing" | "school_poppenzaal" | "familie_poppenzaal",
+  "type": "verplaatsing" | "school_lokaal" | "familie_lokaal",
   "contact": {{"naam": str, "email": str, "telefoon": str, "gsm": str, "bereikbaar_op_speeldag": bool}},
-  "speellocatie": {{"type": "poppenzaal" | "op_verplaatsing", "adres": str}},
+  "speellocatie": {{"type": "{company_building}" | "op_verplaatsing", "adres": str}},
   "voorstelling_titels": [str, ...],
   "doelgroep_leeftijd": str,
   "speeldatum": {{"vaste_datum": str (ISO), "voorkeurdatums": [str, ...], "periode": str, "vage_aanduiding": str}},
@@ -160,7 +161,7 @@ Reservation-schema (gebruik deze veldnamen exact in "extracted" waar van toepass
 === BELANGRIJKE REGELS ===
 - Schrijf antwoorden vriendelijk, professioneel en bondig, in het Nederlands,
   in de "je"-vorm (zoals de bedrijfsinstructies zelf ook doen). Onderteken
-  met "Team Propop".
+  met "Team {company_name}".
 - Houd altijd rekening met de VOLLEDIGE gespreksgeschiedenis: stel geen
   vragen die al eerder in het gesprek beantwoord zijn.
 - Zet "ready_for_action" enkel op true als je ZEKER genoeg bent om een

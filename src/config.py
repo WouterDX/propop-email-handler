@@ -15,8 +15,8 @@ try:
 except ImportError:
     pass
 
-BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent
 
 # --- Gmail ---
 # We need more than just "readonly" from the test script, because the
@@ -27,16 +27,42 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.compose",
 ]
-GMAIL_CREDENTIALS_FILE = os.getenv("GMAIL_CREDENTIALS_FILE", str(BASE_DIR / "credentials.json"))
-GMAIL_TOKEN_FILE = os.getenv("GMAIL_TOKEN_FILE", str(BASE_DIR / "token.json"))
+GMAIL_CREDENTIALS_FILE = os.getenv("GMAIL_CREDENTIALS_FILE", str(PROJECT_ROOT / "credentials.json"))
+GMAIL_TOKEN_FILE = os.getenv("GMAIL_TOKEN_FILE", str(PROJECT_ROOT / "token.json"))
 
 # Query used to determine which emails are "new to process".
-# Default: everything in inbox that does not yet have our own "handled" label.
+# Default: all non-handled emails except system folders (sent/spam/trash/drafts)
+# that contain one of the configured subject keywords.
 GMAIL_LABEL_HANDLED = os.getenv("GMAIL_LABEL_HANDLED", "Processed")
 GMAIL_LABEL_NEEDS_HUMAN = os.getenv("GMAIL_LABEL_NEEDS_HUMAN", "NeedsReview")
+
+GMAIL_SUBJECT_KEYWORDS = [
+    keyword.strip()
+    for keyword in os.getenv("GMAIL_SUBJECT_KEYWORDS", "reservatie,reserveren").split(",")
+    if keyword.strip()
+]
+
+#This setting could also be set to "in:inbox" to only process new incoming emails.
+INCOMING_MAIL_FOLDERS = os.getenv(
+    "INCOMING_MAIL_FOLDERS",
+    "-in:sent -in:spam -in:trash -in:drafts",
+)
+
+_incoming_mail_scope = INCOMING_MAIL_FOLDERS.strip()
+_gmail_base_query = (
+    f"-label:{GMAIL_LABEL_HANDLED.replace('/', '-')} {_incoming_mail_scope}"
+).strip()
+if GMAIL_SUBJECT_KEYWORDS:
+    _gmail_subject_filter = " OR ".join(
+        f"subject:{keyword}" for keyword in GMAIL_SUBJECT_KEYWORDS
+    )
+    _gmail_default_query = f"{_gmail_base_query} ({_gmail_subject_filter})"
+else:
+    _gmail_default_query = _gmail_base_query
+
 GMAIL_QUERY = os.getenv(
     "GMAIL_QUERY",
-    f"in:inbox -label:{GMAIL_LABEL_HANDLED.replace('/', '-')}",
+    _gmail_default_query,
 )
 # Maximum number of messages fetched per run.
 GMAIL_MAX_RESULTS = int(os.getenv("GMAIL_MAX_RESULTS", "10"))
@@ -60,8 +86,8 @@ OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL", "")
 OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "myorg e-mailhandler")
 
-# --- Reservation list (currently a local JSON mock, see reservatielijst.py) ---
-RESERVATIELIJST_FILE = os.getenv("RESERVATIELIJST_FILE", str(BASE_DIR / "data" / "reservations.json"))
+# --- Reservation list (currently a local JSON mock, see reservation_list.py) ---
+RESERVATION_LIST_FILE = os.getenv("RESERVATION_LIST_FILE", str(PROJECT_ROOT / "data" / "reservations.json"))
 
 # --- Company data (JSON file, not hardcoded in source code) ---
 # Copy data/company_data_example.json to data/company_data.json and fill in
@@ -72,4 +98,4 @@ COMPANY_DATA_FILE = os.getenv(
 )
 COMPANY_DATA_EXAMPLE_FILE = str(PROJECT_ROOT / "data" / "company_data_example.json")
 
-INSTRUCTIONS_FILE = os.getenv("INSTRUCTIONS_FILE", str(BASE_DIR / "instructions_email_handler.md"))
+INSTRUCTIONS_FILE = os.getenv("INSTRUCTIONS_FILE", str(PROJECT_ROOT / "data" / "instructions_email_handler.md"))

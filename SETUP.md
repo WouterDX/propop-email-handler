@@ -11,7 +11,7 @@ locally, on top of what `test_gmailaccess.py` already did.
 | `models.py` | Data structures (Reservation, AgentResult) with validation |
 | `email_parser.py` | Converts raw email (bytes) to usable text (stdlib `email`) |
 | `gmail_client.py` | Gmail integration: fetch messages/threads, labels, draft replies |
-| `reservatielijst.py` | Interface to the reservation list + local JSON test version |
+| `reservation_list.py` | Interface to the reservation list + local JSON test version |
 | `ai_agent.py` | Calls OpenRouter to classify + write a reply |
 | `main.py` | Connects everything: fetches emails, calls AI, creates drafts |
 | `instructions_email_handler.md` | Your business instructions (unchanged) — passed literally to the AI |
@@ -177,6 +177,11 @@ Only after you have confidence for a while should you set `AUTO_SEND=true`
 in `.env` so replies are sent immediately. Do this only after several weeks
 of reviewing drafts.
 
+Optional Gmail search scope in `.env`:
+- `INCOMING_MAIL_FOLDERS` controls where the app searches for incoming mails.
+- You can use any Gmail query syntax here (for example labels, categories,
+  inclusions/exclusions such as `in:anywhere -in:spam -in:trash`).
+
 ## 7. Run repeatedly
 
 It's recommended to run this script manually once every day for incoming emails.
@@ -184,17 +189,17 @@ If you do want more automation, you'll have to search information on crontab (ma
 
 ## 8. Reservation list — currently a local test version
 
-`reservatielijst.py` currently contains a simple, **local** implementation
-(`JsonFileReservatieLijst`) that writes reservations to
+`reservation_list.py` currently contains a simple, **local** implementation
+(`JsonFileReservationList`) that writes reservations to
 `data/reservations.json`. This is a placeholder so the full email flow can
 already be tested end to end.
 
 To connect this to the real reservation system on the website:
-1. Write a new class in `reservatielijst.py` that inherits from
-   `ReservatieLijst`, with the five methods `search`, `get`, `create`,
+1. Write a new class in `reservation_list.py` that inherits from
+   `ReservationList`, with the five methods `search`, `get`, `create`,
    `update`, `cancel` implemented against the website's real database/API.
 2. In `main.py`, replace the line
-   `reslijst = reservatielijst_module.JsonFileReservatieLijst()`
+   `reservation_list = reservation_list_module.JsonFileReservationList()`
    with your new class.
 
 Nothing else in the app needs to change for this.

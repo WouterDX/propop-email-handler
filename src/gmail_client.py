@@ -9,17 +9,21 @@ Gmail layer, built on the same pattern as test_gmailaccess.py
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from email.mime.text import MIMEText
 from typing import Optional
 
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 import config
 from email_parser import ParsedEmail, parse_raw_email
+
+log = logging.getLogger(__name__)
 
 
 def get_gmail_service():
@@ -28,14 +32,35 @@ def get_gmail_service():
     creds = None
 
     if os.path.exists(config.GMAIL_TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(
-            config.GMAIL_TOKEN_FILE, config.GMAIL_SCOPES
-        )
+        try:
+            creds = Credentials.from_authorized_user_file(
+                config.GMAIL_TOKEN_FILE, config.GMAIL_SCOPES
+            )
+        except Exception as e:
+            log.warning(
+                "Could not read token file at %s (%s). "
+                "Try deleting this token file and run again to re-authenticate.",
+                config.GMAIL_TOKEN_FILE,
+                e,
+            )
+            creds = None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError as e:
+                log.warning(
+                    "Refreshing Gmail token failed (%s). "
+                    "Try deleting %s and run again to re-authenticate.",
+                    e,
+                    config.GMAIL_TOKEN_FILE,
+                )
+                creds = None
         else:
+            creds = None
+
+        if not creds:
             flow = InstalledAppFlow.from_client_secrets_file(
                 config.GMAIL_CREDENTIALS_FILE, config.GMAIL_SCOPES
             )
@@ -48,7 +73,7 @@ def get_gmail_service():
 
 
 def list_new_message_ids(service, query: str = None, max_results: int = None) -> list[str]:
-    query = query or config.GMAIL_QUERY
+    query = query or config.GMAIL_QUERY    
     max_results = max_results or config.GMAIL_MAX_RESULTS
     results = (
         service.users()
@@ -56,6 +81,8 @@ def list_new_message_ids(service, query: str = None, max_results: int = None) ->
         .list(userId="me", q=query, maxResults=max_results)
         .execute()
     )
+    import code 
+    code.interact(local=dict(locals(), **globals()))
     return [m["id"] for m in results.get("messages", [])]
 
 
@@ -78,10 +105,16 @@ def get_thread_messages(service, thread_id: str, limit: int = None) -> list[Pars
     `limit` messages (see config.THREAD_CONTEXT_LIMIT) as requested in the
     instructions (use context, but avoid unbounded growth)."""
     limit = limit or config.THREAD_CONTEXT_LIMIT
-    thread = service.users().threads().get(userId="me", id=thread_id, format="raw").execute()
+    thread = service.users().threads().get(userId="me", id=thread_id, format="minimal").execute()    
     parsed_messages = []
     for m in thread.get("messages", []):
-        raw_bytes = base64.urlsafe_b64decode(m["raw"])
+        raw_msg = (
+            service.users()
+            .messages()
+            .get(userId="me", id=m["id"], format="raw")
+            .execute()
+        )
+        raw_bytes = base64.urlsafe_b64decode(raw_msg["raw"])
         parsed = parse_raw_email(raw_bytes)
         parsed.gmail_msg_id = m["id"]
         parsed.thread_id = thread_id

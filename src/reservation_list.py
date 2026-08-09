@@ -1,21 +1,21 @@
 """
-Interface naar de "reservatielijst".
+Reservation list interface.
 
-BELANGRIJK: dit bestand is een PLACEHOLDER. In de echte situatie staat de
-reservatielijst op de website (gevuld via de reservatieformulieren). Dit
-project heeft daar momenteel geen actieve verbinding mee.
+IMPORTANT: this file is a PLACEHOLDER. In production, reservations live on
+the website (filled through reservation forms). This project currently has no
+active connection to that system.
 
-`ReservatieLijst` hieronder is de interface die de rest van de app gebruikt.
-`JsonFileReservatieLijst` is een eenvoudige, lokale implementatie (een JSON-
-bestand op schijf) zodat je de hele e-mailflow nu al end-to-end kan testen.
+`ReservationList` below is the interface used by the rest of the app.
+`JsonFileReservationList` is a simple local implementation (a JSON file on
+disk) so you can already test the full email flow end to end.
 
-Om dit later te koppelen aan de echte reservatielijst van de website:
-  1. Schrijf een nieuwe klasse die van `ReservatieLijst` erft en de vier
-     methodes (search, create, update, cancel) implementeert tegen de echte
-     database/API van de website.
-  2. Vervang in main.py de regel `reservatielijst.JsonFileReservatieLijst()`
-     door jouw nieuwe klasse.
-Al de rest van de app (e-mailparsing, AI-agent, Gmail) blijft ongewijzigd.
+To connect this to the real website reservation list later:
+  1. Write a new class inheriting from `ReservationList` and implement the
+      methods (search, create, update, cancel) against the real website
+      database/API.
+  2. Replace `reservation_list_module.JsonFileReservationList()` in main.py
+      with your new class.
+The rest of the app (email parsing, AI agent, Gmail) can stay unchanged.
 """
 from __future__ import annotations
 
@@ -29,15 +29,15 @@ import config
 from models import Reservation
 
 
-class ReservatieLijst(ABC):
+class ReservationList(ABC):
     @abstractmethod
     def search(
         self,
-        naam: Optional[str] = None,
+        name: Optional[str] = None,
         email: Optional[str] = None,
-        speeldatum_bevat: Optional[str] = None,
+        play_date_contains: Optional[str] = None,
     ) -> list[Reservation]:
-        """Zoek kandidaat-reservaties, bv. om een annulering/wijziging te matchen."""
+        """Find candidate reservations, e.g. to match a cancellation/update."""
 
     @abstractmethod
     def get(self, reservation_id: str) -> Optional[Reservation]:
@@ -56,12 +56,12 @@ class ReservatieLijst(ABC):
         ...
 
 
-class JsonFileReservatieLijst(ReservatieLijst):
-    """Lokale mock-implementatie: bewaart reservaties als JSON op schijf.
-    Prima om lokaal te testen; vervang door een echte koppeling voor productie."""
+class JsonFileReservationList(ReservationList):
+    """Local mock implementation: stores reservations as JSON on disk.
+    Great for local testing; replace with a real integration for production."""
 
     def __init__(self, path: str = None):
-        self.path = Path(path or config.RESERVATIELIJST_FILE)
+        self.path = Path(path or config.RESERVATION_LIST_FILE)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self.path.write_text("[]", encoding="utf-8")
@@ -74,25 +74,25 @@ class JsonFileReservatieLijst(ReservatieLijst):
 
     def search(
         self,
-        naam: Optional[str] = None,
+        name: Optional[str] = None,
         email: Optional[str] = None,
-        speeldatum_bevat: Optional[str] = None,
+        play_date_contains: Optional[str] = None,
     ) -> list[Reservation]:
         items = self._load()
         results = []
         for item in items:
-            if item.get("status") == "geannuleerd":
+            if item.get("status") in {"geannuleerd", "canceled"}:
                 continue
             contact = item.get("contact", {}) or {}
             match = True
             if email and contact.get("email", "").lower() != email.lower():
                 match = False
-            if naam and match:
-                if naam.lower() not in (contact.get("naam") or "").lower():
+            if name and match:
+                if name.lower() not in (contact.get("naam") or "").lower():
                     match = False
-            if speeldatum_bevat and match:
+            if play_date_contains and match:
                 sd = json.dumps(item.get("speeldatum", {}), ensure_ascii=False).lower()
-                if speeldatum_bevat.lower() not in sd:
+                if play_date_contains.lower() not in sd:
                     match = False
             if match:
                 results.append(Reservation.model_validate(item))
@@ -116,7 +116,7 @@ class JsonFileReservatieLijst(ReservatieLijst):
             if item.get("id") == reservation_id:
                 item.update(updates)
                 item["updated_at"] = datetime.now(timezone.utc).isoformat()
-                item["status"] = "gewijzigd"
+                item["status"] = "updated"
                 self._save(items)
                 return Reservation.model_validate(item)
         return None
@@ -125,8 +125,12 @@ class JsonFileReservatieLijst(ReservatieLijst):
         items = self._load()
         for item in items:
             if item.get("id") == reservation_id:
-                item["status"] = "geannuleerd"
+                item["status"] = "canceled"
                 item["updated_at"] = datetime.now(timezone.utc).isoformat()
                 self._save(items)
                 return True
         return False
+
+
+ReservationList = ReservationList
+JsonFileReservationList = JsonFileReservationList

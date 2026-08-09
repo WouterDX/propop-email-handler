@@ -93,7 +93,7 @@ email_parser.py   -- standard email parsing (stdlib): text, sender, thread info
 gmail_client.py   -- fetches full thread history (up to 10 previous messages)
    │
    ▼
-reservatielijst.py -- looks up existing reservations for this email address
+reservation_list.py -- looks up existing reservations for this email address
    │
    ▼
 ai_agent.py       -- 1 call to OpenRouter: classifies, extracts
