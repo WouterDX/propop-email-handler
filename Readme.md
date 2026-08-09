@@ -1,5 +1,10 @@
+# Propop email handler
+
+The app in this repo handles email for a small theater, according to rules specified (in Dutch) in `instructions_email_handler.md`: 
+it mainly handles reservations but can also deal with custom requests, and can deal both with email and structured reservations coming from website forms.
+
 # Initial setup
-To run this repo, you must setup as follows:
+To run this repo, follow [`SETUP.md`](SETUP.md).
 
 ## 1. Create a google cloud project in the organisation with the email you want to access.
 Go to http://console.cloud.google.com.
@@ -77,3 +82,36 @@ When running python src/test_gmailaccess.py, the first time you'll be redirected
 
 After that, you're all set.
 
+# How it works.
+```
+Gmail (new email)
+   │
+   ▼
+email_parser.py   -- standard email parsing (stdlib): text, sender, thread info
+   │
+   ▼
+gmail_client.py   -- fetches full thread history (up to 10 previous messages)
+   │
+   ▼
+reservatielijst.py -- looks up existing reservations for this email address
+   │
+   ▼
+ai_agent.py       -- 1 call to OpenRouter: classifies, extracts
+   │                  data, writes a Dutch reply
+   ▼
+main.py           -- executes reservation-list action (if needed),
+                      creates a draft reply in Gmail, labels the email
+```
+
+Everything runs **safely** by default: no email is sent automatically;
+only drafts are created for staff review (see
+`AUTO_SEND` in `SETUP.md`).
+
+# Quickstart
+```bash
+pixi init
+pixi install pixi.toml
+pixi shell
+cp .env.example .env   # fill the required info in .env, see SETUP.d
+python main.py --dry-run --max 3
+```
