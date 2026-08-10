@@ -261,6 +261,7 @@ def analyze_email(
     thread: list[ParsedEmail],
     candidates: list[Reservation],
     own_email_hint: str = "",
+    reservation_list_stub: bool = False,
 ) -> AgentResult:
     """Hoofdfunctie: geef het volledige gesprek + reservatielijst-kandidaten
     mee aan het taalmodel en krijg een gevalideerd AgentResult terug."""
@@ -275,14 +276,28 @@ def analyze_email(
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
     ]
+
+    if reservation_list_stub:
+        messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "RUN MODE OVERRIDE: de reservatielijst is momenteel een stub en niet betrouwbaar. "
+                    "Gebruik kandidaat-reservaties NIET als basis om de klant eerst een bestaande reservatie te laten bevestigen. "
+                    "Vraag in plaats daarvan meteen gericht naar ontbrekende noodzakelijke gegevens om de vraag correct af te handelen. "
+                    "Behoud alle andere regels ongewijzigd."
+                ),
+            }
+        )
+
+    messages.append({"role": "user", "content": user_prompt})
 
     last_error = None
     for attempt in range(2):  # 1 herkansing als het model geen geldige JSON teruggeeft
         raw = _call_openrouter(messages)
         try:
-            parsed = _extract_json(raw)
+            parsed = _extract_json(raw)            
             return AgentResult.model_validate(parsed)
         except (json.JSONDecodeError, ValidationError) as e:
             last_error = e

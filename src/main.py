@@ -23,12 +23,22 @@ Usage:
                                                 # drafts and does not modify the reservation list
                                                 # -- ideal for initial testing
      python main.py --max 3         # process at most 3 conversations this run
+    python main.py --dry-run --drop-last-org-reply
+                        # debug comparison mode: exclude all
+                        # organisation-sent messages that were sent
+                        # after the customer's last message
+    python main.py --dry-run --reservation-list-stub
+                        # debug mode: treat reservation candidates as
+                        # unreliable stub data and ask missing details
+    (set RESERVATION_LIST_STUB=true in .env)
+                        # same behavior via environment default
 """
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
+from email.utils import getaddresses
 
 import config
 import gmail_client
@@ -55,22 +65,95 @@ def _apply_extracted_to_reservation(existing: dict, extracted: dict) -> dict:
     return merged
 
 
-def process_thread(service, reservation_list, thread_id: str, latest_msg_id: str, dry_run: bool):
+def _extract_email_addresses(header_value: str) -> set[str]:
+    if not header_value:
+        return set()
+    return {
+        email.strip().lower()
+        for _, email in getaddresses([header_value])
+        if email and email.strip()
+    }
+
+
+def _drop_org_messages_after_last_customer(
+    thread: list,
+    organisation_emails: set[str],
+    customer_email: str,
+):
+    if not organisation_emails or not customer_email:
+        return thread, []
+
+    customer_email_normalized = customer_email.strip().lower()
+    last_customer_idx = None
+    for idx in range(len(thread) - 1, -1, -1):
+        sender = (thread[idx].from_email or "").strip().lower()
+        if sender == customer_email_normalized:
+            last_customer_idx = idx
+            break
+
+    if last_customer_idx is None:
+        return thread, []
+
+    removed_messages = []
+    filtered = []
+    for idx, message in enumerate(thread):
+        sender = (message.from_email or "").strip().lower()
+        if idx > last_customer_idx and sender in organisation_emails:
+            removed_messages.append(message)
+            continue
+        filtered.append(message)
+
+    return filtered, removed_messages
+
+
+def process_thread(
+    service,
+    reservation_list,
+    thread_id: str,
+    latest_msg_id: str,
+    trigger_message,
+    dry_run: bool,
+    drop_last_org_reply: bool = False,
+    reservation_list_stub: bool = False,
+):
     thread = gmail_client.get_thread_messages(service, thread_id)
     if not thread:
         log.warning("Empty conversation for thread %s, skipping.", thread_id)
         return
 
     latest = thread[-1]
-    log.info("Processing conversation with %s | subject: %s", latest.from_email, latest.subject)
+    customer_email = trigger_message.from_email or latest.from_email
+    log.info("Processing conversation with %s | subject: %s", customer_email, latest.subject)
 
     # We try to automatically determine which email address is the customer and which is our own address.    
-    own_email_hint = latest.to.split(",")[0].strip() if latest.to else ""
+    own_email_hint = trigger_message.to.split(",")[0].strip() if trigger_message.to else ""
 
-    candidates = reservation_list.search(email=latest.from_email)
+    thread_for_analysis = thread
+    if drop_last_org_reply:
+        organisation_emails = _extract_email_addresses(trigger_message.to)
+        filtered_thread, removed_messages = _drop_org_messages_after_last_customer(
+            thread,
+            organisation_emails,
+            customer_email,
+        )
+        if removed_messages:
+            thread_for_analysis = filtered_thread
+            log.info(
+                "  -> dropped %d organisation response(s) after last customer message",
+                len(removed_messages),
+            )
+        else:
+            log.info("  -> no organisation responses found after last customer message")
+
+    candidates = reservation_list.search(email=customer_email)
 
     try:
-        result: AgentResult = analyze_email(thread, candidates, own_email_hint)        
+        result: AgentResult = analyze_email(
+            thread_for_analysis,
+            candidates,
+            own_email_hint,
+            reservation_list_stub=reservation_list_stub,
+        )
     except Exception as e:
         log.error("AI analysis failed for thread %s: %s", thread_id, e)        
         if not dry_run:
@@ -148,7 +231,12 @@ def process_thread(service, reservation_list, thread_id: str, latest_msg_id: str
     gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_HANDLED)
 
 
-def run(dry_run: bool = False, max_threads: int = None):
+def run(
+    dry_run: bool = False,
+    max_threads: int = None,
+    drop_last_org_reply: bool = False,
+    reservation_list_stub: bool = False,
+):
     if not config.OPENROUTER_API_KEY and not dry_run:
         log.warning(
             "OPENROUTER_API_KEY is missing. Add it to your .env -- see SETUP.md. "
@@ -170,7 +258,16 @@ def run(dry_run: bool = False, max_threads: int = None):
         if parsed.thread_id in seen_threads:
             continue
         seen_threads.add(parsed.thread_id)
-        process_thread(service, reservation_list, parsed.thread_id, msg_id, dry_run)
+        process_thread(
+            service,
+            reservation_list,
+            parsed.thread_id,
+            msg_id,
+            parsed,
+            dry_run,
+            drop_last_org_reply=drop_last_org_reply,
+            reservation_list_stub=reservation_list_stub,
+        )
 
         processed += 1
 
@@ -187,10 +284,40 @@ def main():
     parser.add_argument(
         "--max", type=int, default=None, help="Process at most this number of conversations."
     )
+    parser.add_argument(
+        "--drop-last-org-reply",
+        action="store_true",
+        help=(
+            "Debug mode: exclude organisation-sent messages after the customer's "
+            "last message from AI analysis context."
+        ),
+    )
+    parser.set_defaults(reservation_list_stub=config.RESERVATION_LIST_STUB)
+    reservation_stub_group = parser.add_mutually_exclusive_group()
+    reservation_stub_group.add_argument(
+        "--reservation-list-stub",
+        dest="reservation_list_stub",
+        action="store_true",
+        help=(
+            "Debug mode: treat reservation-list candidates as unreliable stub data "
+            "in AI analysis."
+        ),
+    )
+    reservation_stub_group.add_argument(
+        "--no-reservation-list-stub",
+        dest="reservation_list_stub",
+        action="store_false",
+        help="Disable stub mode even when RESERVATION_LIST_STUB=true in the environment.",
+    )
     args = parser.parse_args()
 
     try:
-        run(dry_run=args.dry_run, max_threads=args.max)
+        run(
+            dry_run=args.dry_run,
+            max_threads=args.max,
+            drop_last_org_reply=args.drop_last_org_reply,
+            reservation_list_stub=args.reservation_list_stub,
+        )
     except KeyboardInterrupt:
         sys.exit(1)
 

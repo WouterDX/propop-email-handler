@@ -80,9 +80,7 @@ def list_new_message_ids(service, query: str = None, max_results: int = None) ->
         .messages()
         .list(userId="me", q=query, maxResults=max_results)
         .execute()
-    )
-    import code 
-    code.interact(local=dict(locals(), **globals()))
+    )    
     return [m["id"] for m in results.get("messages", [])]
 
 
