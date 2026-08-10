@@ -25,7 +25,7 @@ Category = Literal[
     "vervolg_overig",               # vervolgvraag die in geen enkele categorie hierboven past
 ]
 
-ReservationType = Literal["verplaatsing", "school_poppenzaal", "familie_poppenzaal"]
+ReservationType = Literal["verplaatsing", "school_lokaal", "familie_lokaal"]
 
 ReservationStatus = Literal["nieuw", "bevestigd", "gewijzigd", "geannuleerd"]
 
