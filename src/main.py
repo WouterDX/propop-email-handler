@@ -162,10 +162,11 @@ def process_thread(
         return        
 
     log.info(
-        "  -> category=%s | ready_for_action=%s | action=%s | needs_human=%s | no_reply=%s",
+        "  -> category=%s | ready_for_action=%s | action=%s | matched_reservation_id=%s | needs_human=%s | no_reply=%s",
         result.category,
         result.ready_for_action,
         result.reservatielijst_action,
+        result.matched_reservation_id,
         result.needs_human,
         result.no_reply_needed,
     )    
