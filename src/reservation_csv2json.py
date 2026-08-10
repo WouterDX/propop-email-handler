@@ -302,7 +302,28 @@ def rij_naar_reservation_dict(row: dict, reservation_type: str) -> dict:
         if uur and datum1:
             extra_velden["voorkeur_uur_ruwe_tekst"] = uur
 
-    else:  # familie_lokaal of school_lokaal (poppenzaal)
+    elif reservation_type == "school_lokaal":
+        geparsed = parse_verplaatsing_kies_veld(kies_ruw)
+        if geparsed["titel"]:
+            voorstelling_titels = [geparsed["titel"]]
+        doelgroep_leeftijd = geparsed["leeftijd"]
+
+        datum1 = get(row, "voorkeur datum")
+        datum2 = get(row, "datum tweede keuze", "tweede keuze")
+        datum3 = get(row, "datum derde keuze", "derde keuze")
+        uur = get(row, "voorkeur uur van de voorstelling", "voorkeur uur", "uur van de voorstelling")
+
+        voorkeurdatums = []
+        if datum1:
+            voorkeurdatums.append(f"{datum1} ({uur})" if uur else datum1)
+        for d in (datum2, datum3):
+            if d and d not in ("/", "-"):
+                voorkeurdatums.append(d)
+        speeldatum["voorkeurdatums"] = voorkeurdatums or None
+        if uur and datum1:
+            extra_velden["voorkeur_uur_ruwe_tekst"] = uur
+
+    else:  # familie_lokaal (poppenzaal)
         geparsed = parse_familie_school_kies_veld(kies_ruw)
         if geparsed["geparsed"]:
             speeldatum["vaste_datum"] = geparsed["vaste_datum"]
