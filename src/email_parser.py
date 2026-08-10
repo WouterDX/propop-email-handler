@@ -70,6 +70,7 @@ class ParsedEmail:
     subject: str
     date: Optional[str]
     body_text: str
+    body_text_full: Optional[str] = None
     thread_id: Optional[str] = None  # wordt door gmail_client ingevuld (Gmail-specifiek)
     gmail_msg_id: Optional[str] = None
 
@@ -113,6 +114,7 @@ def _parsed_from_message(msg: EmailMessage) -> ParsedEmail:
         except Exception:
             date_iso = date_hdr
 
+    full_text = body_text.strip()
     return ParsedEmail(
         message_id=msg.get("Message-ID"),
         in_reply_to=msg.get("In-Reply-To"),
@@ -122,7 +124,8 @@ def _parsed_from_message(msg: EmailMessage) -> ParsedEmail:
         to=msg.get("To", ""),
         subject=msg.get("Subject", "(geen onderwerp)"),
         date=date_iso,
-        body_text=strip_quoted_reply(body_text.strip()),
+        body_text=strip_quoted_reply(full_text),
+        body_text_full=full_text,
     )
 
 

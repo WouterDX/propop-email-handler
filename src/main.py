@@ -36,9 +36,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
+import json
 import logging
+import re
 import sys
 from email.utils import getaddresses
+from pathlib import Path
 
 import config
 import gmail_client
@@ -50,6 +54,100 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
 )
 log = logging.getLogger("propop")
+
+_INCOMPLETE_REASON_PATTERNS = (
+    re.compile(r"onduidelijk", re.IGNORECASE),
+    re.compile(r"onvolledig", re.IGNORECASE),
+    re.compile(r"ontbre", re.IGNORECASE),
+    re.compile(r"te weinig", re.IGNORECASE),
+    re.compile(r"missing", re.IGNORECASE),
+    re.compile(r"insufficient", re.IGNORECASE),
+)
+
+
+def _collect_non_null_field_paths(data: dict, prefix: str = "") -> list[str]:
+    paths: list[str] = []
+    for key, value in data.items():
+        if value is None:
+            continue
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            nested = _collect_non_null_field_paths(value, path)
+            if nested:
+                paths.extend(nested)
+            else:
+                paths.append(path)
+        else:
+            paths.append(path)
+    return paths
+
+
+def _build_update_note(
+    action: str,
+    result: AgentResult,
+    changed_fields: list[str],
+    dry_run: bool,
+) -> str:
+    mode = "DRY-RUN" if dry_run else "LIVE"
+    if action == "create":
+        basis = f"[{mode}] Nieuwe reservatie aangemaakt op basis van extracted velden"
+    elif action == "update":
+        basis = f"[{mode}] Reservatie geüpdatet op velden"
+    elif action == "cancel":
+        basis = f"[{mode}] Reservatie geannuleerd (status -> canceled)"
+    else:
+        basis = f"[{mode}] Reservatieactie uitgevoerd"
+    if changed_fields:
+        basis = f"{basis}: {', '.join(changed_fields)}"
+    if result.interne_notitie:
+        return f"{basis} | AI-notitie: {result.interne_notitie}"
+    return basis
+
+
+def _reservations_update_path(reservation_list) -> Path:
+    source_path = Path(getattr(reservation_list, "path", config.RESERVATION_LIST_FILE))
+    return source_path.parent / "reservations_update.json"
+
+
+def _write_reservations_update_file(reservation_list, updated_items: list[dict]):
+    if not updated_items:
+        return
+    output_path = _reservations_update_path(reservation_list)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(updated_items, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    log.info("Wrote %d updated reservation item(s) to %s", len(updated_items), output_path)
+
+
+def _thread_with_full_text(thread: list) -> list:
+    full_thread = []
+    for message in thread:
+        full_text = getattr(message, "body_text_full", None)
+        if full_text and full_text.strip() and full_text.strip() != (message.body_text or "").strip():
+            full_thread.append(replace(message, body_text=full_text))
+        else:
+            full_thread.append(message)
+    return full_thread
+
+
+def _has_more_full_context(thread: list) -> bool:
+    for message in thread:
+        full_text = getattr(message, "body_text_full", None)
+        stripped = (message.body_text or "").strip()
+        if full_text and full_text.strip() and full_text.strip() != stripped:
+            return True
+    return False
+
+
+def _should_retry_with_full_context(result: AgentResult) -> bool:
+    if result.no_reply_needed or result.ready_for_action:
+        return False
+    if not result.needs_human:
+        return True
+    reason = result.needs_human_reason or ""
+    return any(pattern.search(reason) for pattern in _INCOMPLETE_REASON_PATTERNS)
 
 
 def _apply_extracted_to_reservation(existing: dict, extracted: dict) -> dict:
@@ -116,10 +214,12 @@ def process_thread(
     drop_last_org_reply: bool = False,
     reservation_list_stub: bool = False,
 ):
+    reservation_updates: list[dict] = []
+
     thread = gmail_client.get_thread_messages(service, thread_id)
     if not thread:
         log.warning("Empty conversation for thread %s, skipping.", thread_id)
-        return
+        return reservation_updates
 
     latest = thread[-1]
     customer_email = trigger_message.from_email or latest.from_email
@@ -154,12 +254,21 @@ def process_thread(
             own_email_hint,
             reservation_list_stub=reservation_list_stub,
         )
+
+        if _has_more_full_context(thread_for_analysis) and _should_retry_with_full_context(result):
+            log.info("  -> retrying AI analysis with full quoted context")
+            result = analyze_email(
+                _thread_with_full_text(thread_for_analysis),
+                candidates,
+                own_email_hint,
+                reservation_list_stub=reservation_list_stub,
+            )
     except Exception as e:
         log.error("AI analysis failed for thread %s: %s", thread_id, e)        
         if not dry_run:
             gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_NEEDS_HUMAN)
             gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_HANDLED)
-        return        
+        return reservation_updates       
 
     log.info(
         "  -> category=%s | ready_for_action=%s | action=%s | matched_reservation_id=%s | needs_human=%s | no_reply=%s",
@@ -170,9 +279,10 @@ def process_thread(
         result.needs_human,
         result.no_reply_needed,
     )    
+    
 
     # --- Execute reservation-list action (if applicable) ---
-    if not dry_run and result.ready_for_action and result.reservatielijst_action != "none":
+    if result.ready_for_action and result.reservatielijst_action != "none":
         try:
             if result.reservatielijst_action == "create":
                 data = _apply_extracted_to_reservation({}, result.extracted)
@@ -180,8 +290,18 @@ def process_thread(
                 if result.reservation_type:
                     data["type"] = result.reservation_type
                 reservation = Reservation.model_validate(data)
-                reservation_list.create(reservation)
-                log.info("  -> new reservation created: %s", reservation.id)
+                if not dry_run:
+                    reservation_list.create(reservation)
+                    log.info("  -> new reservation created: %s", reservation.id)
+                else:
+                    log.info("  -> dry-run: reservation create prepared")
+
+                created_item = json.loads(reservation.model_dump_json())
+                changed_fields = _collect_non_null_field_paths(result.extracted)
+                created_item["interne_notitie"] = _build_update_note(
+                    "create", result, changed_fields, dry_run
+                )
+                reservation_updates.append(created_item)
 
             elif result.reservatielijst_action == "update" and result.matched_reservation_id:
                 existing = reservation_list.get(result.matched_reservation_id)
@@ -189,14 +309,39 @@ def process_thread(
                     merged = _apply_extracted_to_reservation(
                         existing.model_dump(), result.extracted
                     )
-                    reservation_list.update(result.matched_reservation_id, merged)
-                    log.info("  -> reservation updated: %s", result.matched_reservation_id)
+                    if not dry_run:
+                        reservation_list.update(result.matched_reservation_id, merged)
+                        log.info("  -> reservation updated: %s", result.matched_reservation_id)
+                    else:
+                        log.info("  -> dry-run: reservation update prepared: %s", result.matched_reservation_id)
+
+                    merged_reservation = Reservation.model_validate(merged)
+                    updated_item = json.loads(merged_reservation.model_dump_json())
+                    changed_fields = _collect_non_null_field_paths(result.extracted)
+                    updated_item["interne_notitie"] = _build_update_note(
+                        "update", result, changed_fields, dry_run
+                    )
+                    reservation_updates.append(updated_item)
                 else:
                     log.warning("  -> matched_reservation_id not found, no update executed.")
 
             elif result.reservatielijst_action == "cancel" and result.matched_reservation_id:
-                ok = reservation_list.cancel(result.matched_reservation_id)
-                log.info("  -> reservation canceled: %s (found=%s)", result.matched_reservation_id, ok)
+                existing = reservation_list.get(result.matched_reservation_id)
+                if existing:
+                    if not dry_run:
+                        ok = reservation_list.cancel(result.matched_reservation_id)
+                        log.info("  -> reservation canceled: %s (found=%s)", result.matched_reservation_id, ok)
+                    else:
+                        log.info("  -> dry-run: reservation cancel prepared: %s", result.matched_reservation_id)
+
+                    canceled_item = existing.model_dump()
+                    canceled_item["status"] = "canceled"
+                    canceled_item["interne_notitie"] = _build_update_note(
+                        "cancel", result, ["status"], dry_run
+                    )
+                    reservation_updates.append(canceled_item)
+                else:
+                    log.warning("  -> matched_reservation_id not found, no cancel executed.")
 
         except Exception as e:
             log.error("  -> error while updating reservation list: %s", e)
@@ -210,12 +355,7 @@ def process_thread(
         print("-" * 70)
         print(result.model_dump_json(indent=2))
         print("=" * 70 + "\n")
-        return
-
-    import code
-    code.interact(local=dict(locals(), **globals()))
-
-    
+        return reservation_updates
 
     if result.no_reply_needed or result.needs_human or not result.reply_email_nl.strip():
         if result.needs_human:
@@ -230,6 +370,7 @@ def process_thread(
             log.info("  -> draft reply created (not sent yet)")
 
     gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_HANDLED)
+    return reservation_updates
 
 
 def run(
@@ -252,6 +393,7 @@ def run(
 
     seen_threads = set()
     processed = 0
+    reservation_updates_for_run: list[dict] = []
     for msg_id in msg_ids:
         if max_threads is not None and processed >= max_threads:
             break
@@ -259,7 +401,7 @@ def run(
         if parsed.thread_id in seen_threads:
             continue
         seen_threads.add(parsed.thread_id)
-        process_thread(
+        updates = process_thread(
             service,
             reservation_list,
             parsed.thread_id,
@@ -269,10 +411,16 @@ def run(
             drop_last_org_reply=drop_last_org_reply,
             reservation_list_stub=reservation_list_stub,
         )
+        reservation_updates_for_run.extend(updates)
 
         processed += 1
+        import code
+        code.interact(local=dict(locals(), **globals()))    
 
+    _write_reservations_update_file(reservation_list, reservation_updates_for_run)
     log.info("Done. %d conversation(s) processed.", processed)
+    import code
+    code.interact(local=dict(locals(), **globals()))    
 
 
 def main():
