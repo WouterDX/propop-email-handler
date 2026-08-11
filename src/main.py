@@ -82,6 +82,31 @@ def _collect_non_null_field_paths(data: dict, prefix: str = "") -> list[str]:
     return paths
 
 
+def _collect_effectively_changed_field_paths(
+    existing_data: dict,
+    extracted_data: dict,
+    prefix: str = "",
+) -> list[str]:
+    paths: list[str] = []
+    for key, value in extracted_data.items():
+        if value is None:
+            continue
+
+        path = f"{prefix}.{key}" if prefix else key
+        existing_value = existing_data.get(key) if isinstance(existing_data, dict) else None
+
+        if isinstance(value, dict):
+            nested_existing = existing_value if isinstance(existing_value, dict) else {}
+            nested = _collect_effectively_changed_field_paths(nested_existing, value, path)
+            paths.extend(nested)
+            continue
+
+        if existing_value != value:
+            paths.append(path)
+
+    return paths
+
+
 def _build_update_note(
     action: str,
     result: AgentResult,
@@ -253,7 +278,7 @@ def process_thread(
             candidates,
             own_email_hint,
             reservation_list_stub=reservation_list_stub,
-        )
+        )        
 
         if _has_more_full_context(thread_for_analysis) and _should_retry_with_full_context(result):
             log.info("  -> retrying AI analysis with full quoted context")
@@ -306,8 +331,9 @@ def process_thread(
             elif result.reservatielijst_action == "update" and result.matched_reservation_id:
                 existing = reservation_list.get(result.matched_reservation_id)
                 if existing:
+                    existing_data = existing.model_dump()
                     merged = _apply_extracted_to_reservation(
-                        existing.model_dump(), result.extracted
+                        existing_data, result.extracted
                     )
                     if not dry_run:
                         reservation_list.update(result.matched_reservation_id, merged)
@@ -317,7 +343,10 @@ def process_thread(
 
                     merged_reservation = Reservation.model_validate(merged)
                     updated_item = json.loads(merged_reservation.model_dump_json())
-                    changed_fields = _collect_non_null_field_paths(result.extracted)
+                    changed_fields = _collect_effectively_changed_field_paths(
+                        existing_data,
+                        result.extracted,
+                    )
                     updated_item["interne_notitie"] = _build_update_note(
                         "update", result, changed_fields, dry_run
                     )
@@ -413,14 +442,10 @@ def run(
         )
         reservation_updates_for_run.extend(updates)
 
-        processed += 1
-        import code
-        code.interact(local=dict(locals(), **globals()))    
+        processed += 1        
 
     _write_reservations_update_file(reservation_list, reservation_updates_for_run)
-    log.info("Done. %d conversation(s) processed.", processed)
-    import code
-    code.interact(local=dict(locals(), **globals()))    
+    log.info("Done. %d conversation(s) processed.", processed)    
 
 
 def main():
