@@ -326,6 +326,7 @@ def process_thread(
                 created_item["interne_notitie"] = _build_update_note(
                     "create", result, changed_fields, dry_run
                 )
+                created_item["reply_email_nl"] = result.reply_email_nl
                 reservation_updates.append(created_item)
 
             elif result.reservatielijst_action == "update" and result.matched_reservation_id:
@@ -350,6 +351,7 @@ def process_thread(
                     updated_item["interne_notitie"] = _build_update_note(
                         "update", result, changed_fields, dry_run
                     )
+                    updated_item["reply_email_nl"] = result.reply_email_nl
                     reservation_updates.append(updated_item)
                 else:
                     log.warning("  -> matched_reservation_id not found, no update executed.")
@@ -368,6 +370,7 @@ def process_thread(
                     canceled_item["interne_notitie"] = _build_update_note(
                         "cancel", result, ["status"], dry_run
                     )
+                    canceled_item["reply_email_nl"] = result.reply_email_nl
                     reservation_updates.append(canceled_item)
                 else:
                     log.warning("  -> matched_reservation_id not found, no cancel executed.")
