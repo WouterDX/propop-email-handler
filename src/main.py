@@ -146,6 +146,21 @@ def _write_reservations_update_file(reservation_list, updated_items: list[dict])
     log.info("Wrote %d updated reservation item(s) to %s", len(updated_items), output_path)
 
 
+def _build_reply_only_update_item(
+    thread_id: str,
+    result: AgentResult,
+    reply_mode: str,
+) -> dict:
+    note = f"[LIVE] Geen reservatie-update; reply {reply_mode}"
+    if result.interne_notitie:
+        note = f"{note} | AI-notitie: {result.interne_notitie}"
+    return {
+        "email_thread_id": thread_id,
+        "interne_notitie": note,
+        "reply_email_nl": result.reply_email_nl,
+    }
+
+
 def _thread_with_full_text(thread: list) -> list:
     full_thread = []
     for message in thread:
@@ -240,6 +255,8 @@ def process_thread(
     reservation_list_stub: bool = False,
 ):
     reservation_updates: list[dict] = []
+    reply_dispatched = False
+    reply_mode = ""
 
     thread = gmail_client.get_thread_messages(service, thread_id)
     if not thread:
@@ -397,9 +414,22 @@ def process_thread(
         if config.AUTO_SEND:
             gmail_client.send_reply(service, latest, result.reply_email_nl)
             log.info("  -> reply SENT (AUTO_SEND=true)")
+            reply_dispatched = True
+            reply_mode = "verstuurd"
         else:
             gmail_client.create_draft_reply(service, latest, result.reply_email_nl)
             log.info("  -> draft reply created (not sent yet)")
+            reply_dispatched = True
+            reply_mode = "als draft aangemaakt"
+
+    if reply_dispatched and not reservation_updates:
+        reservation_updates.append(
+            _build_reply_only_update_item(
+                thread_id,
+                result,
+                reply_mode,
+            )
+        )
 
     gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_HANDLED)
     return reservation_updates
