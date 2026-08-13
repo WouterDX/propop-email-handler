@@ -244,10 +244,33 @@ def _call_openrouter(messages: list[dict]) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"OpenRouter response contains no choices: {data}")
+
+    first_choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = first_choice.get("message") or {}
+    content = message.get("content")
+    finish_reason = first_choice.get("finish_reason")
+
+    if content is None:
+        raise RuntimeError(
+            "OpenRouter returned empty assistant content "
+            f"(finish_reason={finish_reason}). "
+            "This can happen with provider throttling, quota issues, or non-text responses."
+        )
+
+    if isinstance(content, str):
+        return content
+
+    return json.dumps(content, ensure_ascii=False)
 
 
 def _extract_json(raw_text: str) -> dict:
+    if raw_text is None:
+        raise ValueError("AI response content is empty (None)")
+    if not isinstance(raw_text, str):
+        raw_text = str(raw_text)
     text = raw_text.strip()
     # Sommige modellen verpakken JSON toch nog in ```json ... ``` -- vang dit op.
     if text.startswith("```"):
