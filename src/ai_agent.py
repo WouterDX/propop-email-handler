@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+import time
 from typing import Any, Optional
 
 import requests
@@ -29,6 +30,127 @@ log = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT_CACHE: Optional[str] = None
 _COMPANY_DATA_CACHE: Optional[dict[str, Any]] = None
+_OPENROUTER_MODEL_INFO_CACHE: Optional[dict[str, Any]] = None
+_OPENROUTER_MAX_ATTEMPTS = 3
+_OPENROUTER_BASE_RETRY_DELAY_SECONDS = 1.5
+
+
+class _TransientOpenRouterError(RuntimeError):
+    pass
+
+
+def _estimate_tokens_from_chars(char_count: int) -> int:
+    if char_count <= 0:
+        return 0
+    return max(1, char_count // 4)
+
+
+def _fetch_openrouter_model_info() -> dict[str, Any]:
+    global _OPENROUTER_MODEL_INFO_CACHE
+    if _OPENROUTER_MODEL_INFO_CACHE is not None:
+        return _OPENROUTER_MODEL_INFO_CACHE
+
+    headers = {"Content-Type": "application/json"}
+    if config.OPENROUTER_API_KEY:
+        headers["Authorization"] = f"Bearer {config.OPENROUTER_API_KEY}"
+
+    response = requests.get(
+        f"{config.OPENROUTER_BASE_URL}/models",
+        headers=headers,
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    model_entries = payload.get("data") or []
+    for entry in model_entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("id") == config.OPENROUTER_MODEL:
+            _OPENROUTER_MODEL_INFO_CACHE = entry
+            return entry
+
+    raise RuntimeError(
+        f"Configured model '{config.OPENROUTER_MODEL}' not found in OpenRouter /models response."
+    )
+
+
+def _extract_model_context_limit(model_info: dict[str, Any]) -> int | None:
+    direct = model_info.get("context_length")
+    if isinstance(direct, int) and direct > 0:
+        return direct
+
+    top_level_max = model_info.get("max_context_length")
+    if isinstance(top_level_max, int) and top_level_max > 0:
+        return top_level_max
+
+    architecture = model_info.get("architecture")
+    if isinstance(architecture, dict):
+        context_length = architecture.get("context_length")
+        if isinstance(context_length, int) and context_length > 0:
+            return context_length
+
+    return None
+
+
+def _log_prompt_context_diagnostic(
+    messages: list[dict],
+    thread: list[ParsedEmail]
+):
+    system_chars = 0
+    user_chars = 0
+    assistant_chars = 0
+    for message in messages:
+        content = message.get("content")
+        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+        role = message.get("role")
+        if role == "system":
+            system_chars += len(text)
+        elif role == "user":
+            user_chars += len(text)
+        elif role == "assistant":
+            assistant_chars += len(text)
+
+    total_chars = system_chars + user_chars + assistant_chars
+    estimated_tokens = _estimate_tokens_from_chars(total_chars)
+
+    full_thread_chars = 0
+    trimmed_thread_chars = 0
+    for item in thread:
+        full_thread_chars += len((getattr(item, "body_text_full", None) or ""))
+        trimmed_thread_chars += len(item.body_text or "")
+
+    log.info(
+        "AI context diagnostic | model=%s | messages=%d | est_tokens~%d | chars_total=%d (system=%d user=%d assistant=%d) | thread_msgs=%d | thread_chars_trimmed=%d | thread_chars_full=%d",
+        config.OPENROUTER_MODEL,
+        len(messages),
+        estimated_tokens,
+        total_chars,
+        system_chars,
+        user_chars,
+        assistant_chars,
+        len(thread),
+        trimmed_thread_chars,
+        full_thread_chars,
+    )    
+
+    try:
+        model_info = _fetch_openrouter_model_info()
+        context_limit = _extract_model_context_limit(model_info)
+        if context_limit is None:
+            log.info(
+                "AI context diagnostic | model limit unavailable from OpenRouter /models for %s",
+                config.OPENROUTER_MODEL,
+            )
+            return
+
+        usage_pct = (estimated_tokens / context_limit) * 100 if context_limit > 0 else 0.0
+        log.info(
+            "AI context diagnostic | model_context_limit=%d | est_usage=%.1f%%",
+            context_limit,
+            usage_pct,
+        )
+    except Exception as e:
+        log.warning("AI context diagnostic | failed to fetch model limits: %s", e)
 
 
 def _load_instructions() -> str:
@@ -231,39 +353,98 @@ def _call_openrouter(messages: list[dict]) -> str:
     if config.OPENROUTER_APP_NAME:
         headers["X-Title"] = config.OPENROUTER_APP_NAME
 
-    resp = requests.post(
-        f"{config.OPENROUTER_BASE_URL}/chat/completions",
-        headers=headers,
-        json={
-            "model": config.OPENROUTER_MODEL,
-            "messages": messages,
-            "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"OpenRouter response contains no choices: {data}")
+    last_error: Exception | None = None
 
-    first_choice = choices[0] if isinstance(choices[0], dict) else {}
-    message = first_choice.get("message") or {}
-    content = message.get("content")
-    finish_reason = first_choice.get("finish_reason")
+    for attempt in range(1, _OPENROUTER_MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.post(
+                f"{config.OPENROUTER_BASE_URL}/chat/completions",
+                headers=headers,
+                json={
+                    "model": config.OPENROUTER_MODEL,
+                    "messages": messages,
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            choices = data.get("choices") or []
+            if not choices:
+                raise RuntimeError(f"OpenRouter response contains no choices: {data}")
 
-    if content is None:
+            first_choice = choices[0] if isinstance(choices[0], dict) else {}
+            message = first_choice.get("message") or {}
+            content = message.get("content")
+            finish_reason = first_choice.get("finish_reason")
+
+            if content is None:
+                raise _TransientOpenRouterError(
+                    "OpenRouter returned empty assistant content "
+                    f"(finish_reason={finish_reason}). "
+                    "This can happen with provider throttling, quota issues, or non-text responses."
+                )
+
+            if isinstance(content, str):
+                return content
+
+            return json.dumps(content, ensure_ascii=False)
+
+        except (requests.Timeout, requests.ConnectionError, _TransientOpenRouterError) as e:
+            last_error = e
+            if attempt >= _OPENROUTER_MAX_ATTEMPTS:
+                break
+            delay = _OPENROUTER_BASE_RETRY_DELAY_SECONDS * attempt
+            log.warning(
+                "OpenRouter transient failure (attempt %d/%d): %s. Retrying in %.1fs...",
+                attempt,
+                _OPENROUTER_MAX_ATTEMPTS,
+                e,
+                delay,
+            )
+            time.sleep(delay)
+
+        except requests.HTTPError as e:
+            last_error = e
+            status_code = e.response.status_code if e.response is not None else None
+            retryable = bool(
+                status_code in (408, 409, 425, 429)
+                or (status_code is not None and 500 <= status_code <= 599)
+            )
+            if not retryable or attempt >= _OPENROUTER_MAX_ATTEMPTS:
+                break
+
+            retry_after_value = (
+                (e.response.headers.get("Retry-After") if e.response is not None else None)
+                or ""
+            ).strip()
+            retry_after_seconds: float | None = None
+            if retry_after_value.isdigit():
+                retry_after_seconds = float(retry_after_value)
+
+            delay = retry_after_seconds if retry_after_seconds is not None else (_OPENROUTER_BASE_RETRY_DELAY_SECONDS * attempt)
+            log.warning(
+                "OpenRouter HTTP %s (attempt %d/%d). Retrying in %.1fs...",
+                status_code,
+                attempt,
+                _OPENROUTER_MAX_ATTEMPTS,
+                delay,
+            )
+            time.sleep(delay)
+
+    if isinstance(last_error, requests.HTTPError):
+        status_code = last_error.response.status_code if last_error.response is not None else "unknown"
         raise RuntimeError(
-            "OpenRouter returned empty assistant content "
-            f"(finish_reason={finish_reason}). "
-            "This can happen with provider throttling, quota issues, or non-text responses."
-        )
+            f"OpenRouter request failed after {_OPENROUTER_MAX_ATTEMPTS} attempts (HTTP {status_code})."
+        ) from last_error
 
-    if isinstance(content, str):
-        return content
+    if last_error is not None:
+        raise RuntimeError(
+            f"OpenRouter request failed after {_OPENROUTER_MAX_ATTEMPTS} attempts: {last_error}"
+        ) from last_error
 
-    return json.dumps(content, ensure_ascii=False)
+    raise RuntimeError("OpenRouter request failed for an unknown reason.")
 
 
 def _extract_json(raw_text: str) -> dict:
@@ -315,6 +496,9 @@ def analyze_email(
         )
 
     messages.append({"role": "user", "content": user_prompt})
+
+    
+    _log_prompt_context_diagnostic(messages,thread)
 
     last_error = None
     for attempt in range(2):  # 1 herkansing als het model geen geldige JSON teruggeeft
