@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from difflib import SequenceMatcher
 import json
 import logging
 import re
@@ -55,13 +56,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("propop")
 
-_INCOMPLETE_REASON_PATTERNS = (
-    re.compile(r"onduidelijk", re.IGNORECASE),
-    re.compile(r"onvolledig", re.IGNORECASE),
-    re.compile(r"ontbre", re.IGNORECASE),
-    re.compile(r"te weinig", re.IGNORECASE),
-    re.compile(r"missing", re.IGNORECASE),
-    re.compile(r"insufficient", re.IGNORECASE),
+_QUOTE_MARKERS = (
+    re.compile(r"^Op .{0,80} schreef .{0,80}:\s*$", re.IGNORECASE),
+    re.compile(r"^On .{0,80} wrote:\s*$", re.IGNORECASE),
+    re.compile(r"^-{2,}\s*Original Message\s*-{2,}", re.IGNORECASE),
+    re.compile(r"^Van:\s.+$", re.IGNORECASE),
+    re.compile(r"^From:\s.+$", re.IGNORECASE),
+)
+
+_QUOTE_HEADER_LINES = (
+    re.compile(r"^(from|van|sent|verzonden|to|aan|subject|onderwerp|date|datum|cc):\s*", re.IGNORECASE),
+    re.compile(r"^op .{0,80} schreef .{0,80}:\s*$", re.IGNORECASE),
+    re.compile(r"^on .{0,80} wrote:\s*$", re.IGNORECASE),
 )
 
 
@@ -181,13 +187,81 @@ def _has_more_full_context(thread: list) -> bool:
     return False
 
 
-def _should_retry_with_full_context(result: AgentResult) -> bool:
-    if result.no_reply_needed or result.ready_for_action:
+def _extract_quoted_text(full_text: str) -> str:
+    lines = full_text.splitlines()
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if any(pattern.match(stripped) for pattern in _QUOTE_MARKERS):
+            return "\n".join(lines[index:]).strip()
+    return ""
+
+
+def _normalize_quoted_for_compare(text: str) -> str:
+    normalized_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        stripped = re.sub(r"^>+\s*", "", stripped)
+        if not stripped:
+            continue
+        if any(pattern.match(stripped) for pattern in _QUOTE_MARKERS):
+            continue
+        if any(pattern.match(stripped) for pattern in _QUOTE_HEADER_LINES):
+            continue
+        normalized_lines.append(stripped.lower())
+
+    compact = " ".join(normalized_lines)
+    return re.sub(r"\s+", " ", compact).strip()
+
+
+def _quoted_text_differs_from_previous_messages(
+    quoted_text: str,
+    previous_messages: list,
+    min_length: int = 40,
+    similarity_threshold: float = 0.8,
+) -> bool:
+    quoted_normalized = _normalize_quoted_for_compare(quoted_text)
+    if len(quoted_normalized) < min_length:
         return False
-    if not result.needs_human:
-        return True
-    reason = result.needs_human_reason or ""
-    return any(pattern.search(reason) for pattern in _INCOMPLETE_REASON_PATTERNS)
+
+    previous_normalized: list[str] = []
+    for message in previous_messages:
+        baseline = getattr(message, "body_text_full", None) or message.body_text or ""
+        normalized = _normalize_quoted_for_compare(baseline)
+        if len(normalized) >= min_length:
+            previous_normalized.append(normalized)
+
+    if not previous_normalized:
+        return False
+
+    for candidate in previous_normalized:
+        if candidate in quoted_normalized:
+            return False
+
+    best_similarity = 0.0
+    for candidate in previous_normalized:
+        similarity = SequenceMatcher(None, quoted_normalized, candidate).ratio()
+        if similarity > best_similarity:
+            best_similarity = similarity
+
+    return best_similarity >= similarity_threshold
+
+
+def _should_retry_with_full_context(thread: list) -> bool:
+    for idx, message in enumerate(thread):
+        full_text = getattr(message, "body_text_full", None) or ""
+        body_text = message.body_text or ""
+        if not full_text.strip() or full_text.strip() == body_text.strip():
+            continue
+
+        quoted_text = _extract_quoted_text(full_text)
+        if not quoted_text:
+            continue
+
+        if _quoted_text_differs_from_previous_messages(quoted_text, thread[:idx]):
+            return True
+    return False
 
 
 def _apply_extracted_to_reservation(existing: dict, extracted: dict) -> dict:
@@ -289,22 +363,20 @@ def process_thread(
 
     candidates = reservation_list.search(email=customer_email)
 
+    if (
+        _has_more_full_context(thread_for_analysis)
+        and _should_retry_with_full_context(thread_for_analysis)
+    ):
+        log.info("  -> quoted older-email text differs from thread history; analyzing with full quoted context")
+        thread_for_analysis=_thread_with_full_text(thread_for_analysis)        
+
     try:
         result: AgentResult = analyze_email(
             thread_for_analysis,
             candidates,
             own_email_hint,
             reservation_list_stub=reservation_list_stub,
-        )        
-
-        if _has_more_full_context(thread_for_analysis) and _should_retry_with_full_context(result):
-            log.info("  -> retrying AI analysis with full quoted context")
-            result = analyze_email(
-                _thread_with_full_text(thread_for_analysis),
-                candidates,
-                own_email_hint,
-                reservation_list_stub=reservation_list_stub,
-            )
+        )
     except Exception as e:
         log.error("AI analysis failed for thread %s: %s", thread_id, e)        
         if not dry_run:
