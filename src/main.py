@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from difflib import SequenceMatcher
 import json
 import logging
 import re
@@ -219,33 +218,24 @@ def _quoted_text_differs_from_previous_messages(
     quoted_text: str,
     previous_messages: list,
     min_length: int = 40,
-    similarity_threshold: float = 0.8,
 ) -> bool:
     quoted_normalized = _normalize_quoted_for_compare(quoted_text)
     if len(quoted_normalized) < min_length:
         return False
 
-    previous_normalized: list[str] = []
     for message in previous_messages:
         baseline = getattr(message, "body_text_full", None) or message.body_text or ""
-        normalized = _normalize_quoted_for_compare(baseline)
-        if len(normalized) >= min_length:
-            previous_normalized.append(normalized)
-
-    if not previous_normalized:
-        return False
-
-    for candidate in previous_normalized:
-        if candidate in quoted_normalized:
+        previous_normalized = _normalize_quoted_for_compare(baseline)
+        if len(previous_normalized) < min_length:
+            continue
+        if previous_normalized == quoted_normalized:
+            return False
+        if previous_normalized in quoted_normalized:
+            return False
+        if quoted_normalized in previous_normalized:
             return False
 
-    best_similarity = 0.0
-    for candidate in previous_normalized:
-        similarity = SequenceMatcher(None, quoted_normalized, candidate).ratio()
-        if similarity > best_similarity:
-            best_similarity = similarity
-
-    return best_similarity >= similarity_threshold
+    return True
 
 
 def _should_retry_with_full_context(thread: list) -> bool:
@@ -368,7 +358,9 @@ def process_thread(
         and _should_retry_with_full_context(thread_for_analysis)
     ):
         log.info("  -> quoted older-email text differs from thread history; analyzing with full quoted context")
-        thread_for_analysis=_thread_with_full_text(thread_for_analysis)        
+        thread_for_analysis = _thread_with_full_text(thread_for_analysis)
+    else:
+        log.info("  -> quoted context matches thread history; analyzing with trimmed body context")
 
     try:
         result: AgentResult = analyze_email(
