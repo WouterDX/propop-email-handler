@@ -18,6 +18,8 @@ import logging
 from pathlib import Path
 import time
 from typing import Any, Optional
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 
 import requests
 from pydantic import ValidationError
@@ -33,10 +35,68 @@ _COMPANY_DATA_CACHE: Optional[dict[str, Any]] = None
 _OPENROUTER_MODEL_INFO_CACHE: Optional[dict[str, Any]] = None
 _OPENROUTER_MAX_ATTEMPTS = 3
 _OPENROUTER_BASE_RETRY_DELAY_SECONDS = 1.5
+_OPENROUTER_MAX_RETRY_DELAY_SECONDS = 60.0
 
 
 class _TransientOpenRouterError(RuntimeError):
     pass
+
+
+def _parse_retry_after_seconds(retry_after_value: str | None) -> float | None:
+    if not retry_after_value:
+        return None
+
+    raw = retry_after_value.strip()
+    if not raw:
+        return None
+
+    try:
+        seconds = float(raw)
+        return seconds if seconds > 0 else None
+    except ValueError:
+        pass
+
+    try:
+        retry_dt = parsedate_to_datetime(raw)
+    except Exception:
+        return None
+
+    if retry_dt.tzinfo is None:
+        retry_dt = retry_dt.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    delta = (retry_dt - now).total_seconds()
+    return delta if delta > 0 else None
+
+
+def _extract_openrouter_error_payload(resp: requests.Response) -> dict[str, Any]:
+    try:
+        payload = resp.json()
+    except ValueError:
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return {}
+
+    metadata = error.get("metadata") if isinstance(error.get("metadata"), dict) else {}
+    return {
+        "code": error.get("code"),
+        "message": error.get("message"),
+        "error_type": metadata.get("error_type"),
+        "provider_code": metadata.get("provider_code"),
+    }
+
+
+def _compute_retry_delay_seconds(attempt: int, retry_after_seconds: float | None) -> float:
+    if retry_after_seconds is not None:
+        return min(retry_after_seconds, _OPENROUTER_MAX_RETRY_DELAY_SECONDS)
+
+    backoff_delay = _OPENROUTER_BASE_RETRY_DELAY_SECONDS * (2 ** (attempt - 1))
+    return min(backoff_delay, _OPENROUTER_MAX_RETRY_DELAY_SECONDS)
 
 
 def _estimate_tokens_from_chars(char_count: int) -> int:
@@ -375,6 +435,32 @@ def _call_openrouter(messages: list[dict]) -> str:
                 raise RuntimeError(f"OpenRouter response contains no choices: {data}")
 
             first_choice = choices[0] if isinstance(choices[0], dict) else {}
+            choice_error = first_choice.get("error") if isinstance(first_choice.get("error"), dict) else None
+            if choice_error:
+                error_code = choice_error.get("code")
+                metadata = choice_error.get("metadata") if isinstance(choice_error.get("metadata"), dict) else {}
+                error_type = metadata.get("error_type")
+                provider_code = metadata.get("provider_code")
+                error_message = choice_error.get("message") or "OpenRouter returned provider error in choice"
+                retryable = bool(
+                    error_code in (408, 409, 425, 429, 502, 503, 504)
+                    or error_type in {
+                        "rate_limit_exceeded",
+                        "provider_overloaded",
+                        "provider_unavailable",
+                        "timeout",
+                        "server",
+                        "unmapped",
+                    }
+                )
+                detail = (
+                    f"{error_message} "
+                    f"(code={error_code}, error_type={error_type}, provider_code={provider_code})"
+                )
+                if retryable:
+                    raise _TransientOpenRouterError(detail)
+                raise RuntimeError(detail)
+
             message = first_choice.get("message") or {}
             content = message.get("content")
             finish_reason = first_choice.get("finish_reason")
@@ -395,7 +481,7 @@ def _call_openrouter(messages: list[dict]) -> str:
             last_error = e
             if attempt >= _OPENROUTER_MAX_ATTEMPTS:
                 break
-            delay = _OPENROUTER_BASE_RETRY_DELAY_SECONDS * attempt
+            delay = _compute_retry_delay_seconds(attempt, None)
             log.warning(
                 "OpenRouter transient failure (attempt %d/%d): %s. Retrying in %.1fs...",
                 attempt,
@@ -408,35 +494,79 @@ def _call_openrouter(messages: list[dict]) -> str:
         except requests.HTTPError as e:
             last_error = e
             status_code = e.response.status_code if e.response is not None else None
+            error_payload = _extract_openrouter_error_payload(e.response) if e.response is not None else {}
+            error_type = error_payload.get("error_type")
+            provider_code = error_payload.get("provider_code")
+            error_message = error_payload.get("message")
             retryable = bool(
                 status_code in (408, 409, 425, 429)
                 or (status_code is not None and 500 <= status_code <= 599)
+                or error_type in {
+                    "rate_limit_exceeded",
+                    "provider_overloaded",
+                    "provider_unavailable",
+                    "timeout",
+                    "server",
+                    "unmapped",
+                }
             )
             if not retryable or attempt >= _OPENROUTER_MAX_ATTEMPTS:
                 break
 
-            retry_after_value = (
+            retry_after_seconds = _parse_retry_after_seconds(
                 (e.response.headers.get("Retry-After") if e.response is not None else None)
-                or ""
-            ).strip()
-            retry_after_seconds: float | None = None
-            if retry_after_value.isdigit():
-                retry_after_seconds = float(retry_after_value)
-
-            delay = retry_after_seconds if retry_after_seconds is not None else (_OPENROUTER_BASE_RETRY_DELAY_SECONDS * attempt)
+            )
+            delay = _compute_retry_delay_seconds(attempt, retry_after_seconds)
+            retry_after_hint = (
+                f" | retry_after={retry_after_seconds:.1f}s"
+                if retry_after_seconds is not None
+                else ""
+            )
+            error_type_hint = f" | error_type={error_type}" if error_type else ""
+            provider_code_hint = f" | provider_code={provider_code}" if provider_code else ""
+            message_hint = f" | message={error_message}" if error_message else ""
             log.warning(
-                "OpenRouter HTTP %s (attempt %d/%d). Retrying in %.1fs...",
+                "OpenRouter HTTP %s (attempt %d/%d). Retrying in %.1fs...%s%s%s%s",
                 status_code,
                 attempt,
                 _OPENROUTER_MAX_ATTEMPTS,
                 delay,
+                retry_after_hint,
+                error_type_hint,
+                provider_code_hint,
+                message_hint,
             )
             time.sleep(delay)
 
     if isinstance(last_error, requests.HTTPError):
         status_code = last_error.response.status_code if last_error.response is not None else "unknown"
+        error_payload = _extract_openrouter_error_payload(last_error.response) if last_error.response is not None else {}
+        error_type = error_payload.get("error_type")
+        provider_code = error_payload.get("provider_code")
+        error_message = error_payload.get("message")
+
+        if status_code == 429 or error_type == "rate_limit_exceeded":
+            retry_after_seconds = _parse_retry_after_seconds(
+                (last_error.response.headers.get("Retry-After") if last_error.response is not None else None)
+            )
+            retry_hint = (
+                f" Retry-After={retry_after_seconds:.1f}s."
+                if retry_after_seconds is not None
+                else ""
+            )
+            raise RuntimeError(
+                "OpenRouter rate limit reached (429/rate_limit_exceeded)."
+                f" Retries exhausted after {_OPENROUTER_MAX_ATTEMPTS} attempts.{retry_hint}"
+                " Consider lowering request burst/concurrency or waiting before retrying."
+            ) from last_error
+
+        detail = (
+            f"error_type={error_type}, provider_code={provider_code}, message={error_message}"
+            if (error_type or provider_code or error_message)
+            else "no structured error details"
+        )
         raise RuntimeError(
-            f"OpenRouter request failed after {_OPENROUTER_MAX_ATTEMPTS} attempts (HTTP {status_code})."
+            f"OpenRouter request failed after {_OPENROUTER_MAX_ATTEMPTS} attempts (HTTP {status_code}; {detail})."
         ) from last_error
 
     if last_error is not None:
