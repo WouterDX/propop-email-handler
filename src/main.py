@@ -205,6 +205,7 @@ def _build_review_item(
     thread_id: str,
     latest_msg_id: str,
     latest,
+    analyzed_message,
     result: AgentResult | None,
     dry_run: bool,
     reservation_proposal: dict | None,
@@ -235,10 +236,10 @@ def _build_review_item(
         "mail": {
             "thread_id": thread_id,
             "gmail_message_id": latest_msg_id,
-            "from_email": latest.from_email,
-            "subject": latest.subject,
-            "date": latest.date,
-            "body_preview": (latest.body_text or "")[:2000],
+            "from_email": analyzed_message.from_email,
+            "subject": analyzed_message.subject,
+            "date": analyzed_message.date,
+            "body_preview": (analyzed_message.body_text or "")[:2000],
         },
         "proposal": proposal,
     }
@@ -456,6 +457,8 @@ def process_thread(
     else:
         log.info("  -> quoted context matches thread history; analyzing with trimmed body context")
 
+    analyzed_message = thread_for_analysis[-1]
+
     try:
         result: AgentResult = analyze_email(
             thread_for_analysis,
@@ -472,6 +475,7 @@ def process_thread(
             thread_id,
             latest_msg_id,
             latest,
+            analyzed_message,
             result=None,
             dry_run=dry_run,
             reservation_proposal=None,
@@ -590,6 +594,7 @@ def process_thread(
             thread_id,
             latest_msg_id,
             latest,
+            analyzed_message,
             result,
             dry_run,
             reservation_proposal,
@@ -630,6 +635,7 @@ def process_thread(
         thread_id,
         latest_msg_id,
         latest,
+        analyzed_message,
         result,
         dry_run,
         reservation_proposal,

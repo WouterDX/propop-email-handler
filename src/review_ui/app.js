@@ -2,6 +2,12 @@ let items = [];
 let currentIndex = 0;
 let dragStartX = null;
 
+const statusLabels = {
+  pending: "in behandeling",
+  approved: "goedgekeurd",
+  rejected: "afgekeurd",
+};
+
 const countsEl = document.getElementById("counts");
 const emptyEl = document.getElementById("empty-state");
 const cardEl = document.getElementById("card");
@@ -24,8 +30,17 @@ function fmt(value) {
 }
 
 function formatChange(change) {
-  if (!change) return "No reservation changes proposed.";
-  return JSON.stringify(change, null, 2);
+  if (!change) return "Geen reservatiewijzigingen voorgesteld.";
+
+  const changedFields = Array.isArray(change.changed_fields)
+    ? change.changed_fields.filter((field) => typeof field === "string" && field.trim())
+    : [];
+
+  if (!changedFields.length) {
+    return "Geen gewijzigde velden.";
+  }
+
+  return changedFields.map((field) => `• ${field}`).join("\n");
 }
 
 function updateCounts() {
@@ -33,7 +48,7 @@ function updateCounts() {
   const pending = items.filter((item) => item.status === "pending").length;
   const approved = items.filter((item) => item.status === "approved").length;
   const rejected = items.filter((item) => item.status === "rejected").length;
-  countsEl.textContent = `Total: ${total} | Pending: ${pending} | Approved: ${approved} | Rejected: ${rejected}`;
+  countsEl.textContent = `Totaal: ${total} | In behandeling: ${pending} | Goedgekeurd: ${approved} | Afgekeurd: ${rejected}`;
 }
 
 function render() {
@@ -52,13 +67,13 @@ function render() {
   const mail = item.mail || {};
   const proposal = item.proposal || {};
 
-  subjectEl.textContent = mail.subject || "(no subject)";
+  subjectEl.textContent = mail.subject || "(geen onderwerp)";
   metaEl.textContent = `${fmt(mail.from_email)} • ${fmt(mail.date)} • thread ${fmt(mail.thread_id)}`;
-  statusPillEl.textContent = item.status || "pending";
+  statusPillEl.textContent = statusLabels[item.status] || item.status || "in behandeling";
 
-  replyTextEl.textContent = proposal.reply_email_nl || "No proposed reply.";
+  replyTextEl.textContent = proposal.reply_email_nl || "Geen voorgesteld antwoord.";
   reservationChangeEl.textContent = formatChange(proposal.reservation_change);
-  mailPreviewEl.textContent = mail.body_preview || "No mail preview.";
+  mailPreviewEl.textContent = mail.body_preview || "Geen e-mailpreview beschikbaar.";
 
   positionLabelEl.textContent = `${currentIndex + 1} / ${items.length}`;
   prevBtn.disabled = currentIndex === 0;
@@ -89,8 +104,8 @@ async function decide(decision) {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Unknown error" }));
-    alert(error.error || "Failed to save decision");
+    const error = await response.json().catch(() => ({ error: "Onbekende fout" }));
+    alert(error.error || "Opslaan van beslissing mislukt");
     return;
   }
 
@@ -143,5 +158,5 @@ rejectBtn.addEventListener("click", () => decide("rejected"));
 setupSwipe();
 loadItems().catch((error) => {
   console.error(error);
-  countsEl.textContent = "Failed to load review queue.";
+  countsEl.textContent = "Laden van review-queue mislukt.";
 });

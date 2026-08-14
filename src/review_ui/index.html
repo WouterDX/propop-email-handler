@@ -3,18 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mail Review</title>
+    <title>E-mailreview</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="app">
       <header class="topbar">
-        <h1>Mail review</h1>
+        <h1>E-mailreview</h1>
         <div id="counts" class="counts"></div>
       </header>
 
       <section id="empty-state" class="empty hidden">
-        <p>No review items found. Run the mail handler first to build the queue.</p>
+        <p>Geen review-items gevonden. Voer eerst de mailverwerking uit om de queue op te bouwen.</p>
       </section>
 
       <section id="card" class="card hidden" aria-live="polite">
@@ -28,31 +28,31 @@
 
         <div class="card-body">
           <article class="panel">
-            <h3>Proposed answer</h3>
+            <h3>Geanalyseerde e-mail</h3>
+            <pre id="mail-preview" class="pre-block"></pre>
+          </article>
+
+          <article class="panel">
+            <h3>Voorgesteld antwoord</h3>
             <pre id="reply-text" class="pre-block"></pre>
           </article>
 
           <article class="panel">
-            <h3>Proposed reservation changes</h3>
+            <h3>Voorgestelde reservatiewijzigingen</h3>
             <pre id="reservation-change" class="pre-block"></pre>
-          </article>
-
-          <article class="panel">
-            <h3>Mail preview</h3>
-            <pre id="mail-preview" class="pre-block"></pre>
           </article>
         </div>
 
         <footer class="card-footer">
           <div class="nav-group">
-            <button id="prev-btn" type="button">◀ Previous</button>
+            <button id="prev-btn" type="button">◀ Vorige</button>
             <span id="position-label" class="position">0 / 0</span>
-            <button id="next-btn" type="button">Next ▶</button>
+            <button id="next-btn" type="button">Volgende ▶</button>
           </div>
           <div class="decision-group">
-            <input id="decision-reason" type="text" placeholder="Optional reason" />
-            <button id="reject-btn" type="button" class="reject">Reject</button>
-            <button id="approve-btn" type="button" class="approve">Approve</button>
+            <input id="decision-reason" type="text" placeholder="Optionele reden" />
+            <button id="reject-btn" type="button" class="reject">Afkeuren</button>
+            <button id="approve-btn" type="button" class="approve">Goedkeuren</button>
           </div>
         </footer>
       </section>
