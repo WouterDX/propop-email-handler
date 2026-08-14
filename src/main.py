@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 import logging
 import re
@@ -149,6 +150,98 @@ def _write_reservations_update_file(reservation_list, updated_items: list[dict])
         encoding="utf-8",
     )
     log.info("Wrote %d updated reservation item(s) to %s", len(updated_items), output_path)
+
+
+def _review_queue_path() -> Path:
+    return Path(config.REVIEW_QUEUE_FILE)
+
+
+def _build_review_id(thread_id: str, message_id: str) -> str:
+    return f"{thread_id}:{message_id}"
+
+
+def _write_review_queue_file(review_items: list[dict]):
+    if not review_items:
+        return
+
+    output_path = _review_queue_path()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing_items: list[dict] = []
+    if output_path.exists():
+        try:
+            existing_items = json.loads(output_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing_items = []
+
+    existing_by_id = {
+        item.get("review_id"): item
+        for item in existing_items
+        if isinstance(item, dict) and item.get("review_id")
+    }
+
+    for review_item in review_items:
+        review_id = review_item.get("review_id")
+        previous = existing_by_id.get(review_id)
+        if previous and previous.get("status") in {"approved", "rejected"}:
+            review_item["status"] = previous.get("status")
+            review_item["decision_reason"] = previous.get("decision_reason")
+            review_item["decided_at"] = previous.get("decided_at")
+        existing_by_id[review_id] = review_item
+
+    merged = sorted(
+        existing_by_id.values(),
+        key=lambda item: item.get("created_at") or "",
+        reverse=True,
+    )
+    output_path.write_text(
+        json.dumps(merged, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    log.info("Wrote %d review queue item(s) to %s", len(review_items), output_path)
+
+
+def _build_review_item(
+    thread_id: str,
+    latest_msg_id: str,
+    latest,
+    result: AgentResult | None,
+    dry_run: bool,
+    reservation_proposal: dict | None,
+    error: str | None = None,
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    proposal = {
+        "category": result.category if result else "vervolg_overig",
+        "ready_for_action": result.ready_for_action if result else False,
+        "reservation_action": result.reservatielijst_action if result else "none",
+        "matched_reservation_id": result.matched_reservation_id if result else None,
+        "needs_human": result.needs_human if result else True,
+        "needs_human_reason": result.needs_human_reason if result else "AI analysis failed",
+        "no_reply_needed": result.no_reply_needed if result else False,
+        "reply_email_nl": result.reply_email_nl if result else "",
+        "interne_notitie": result.interne_notitie if result else None,
+        "reservation_change": reservation_proposal,
+    }
+    return {
+        "review_id": _build_review_id(thread_id, latest_msg_id),
+        "status": "pending",
+        "decision_reason": None,
+        "decided_at": None,
+        "created_at": now,
+        "updated_at": now,
+        "run_mode": "dry-run" if dry_run else "live",
+        "error": error,
+        "mail": {
+            "thread_id": thread_id,
+            "gmail_message_id": latest_msg_id,
+            "from_email": latest.from_email,
+            "subject": latest.subject,
+            "date": latest.date,
+            "body_preview": (latest.body_text or "")[:2000],
+        },
+        "proposal": proposal,
+    }
 
 
 def _build_reply_only_update_item(
@@ -317,15 +410,16 @@ def process_thread(
     dry_run: bool,
     drop_last_org_reply: bool = False,
     reservation_list_stub: bool = False,
-):
+) -> tuple[list[dict], dict | None]:
     reservation_updates: list[dict] = []
+    reservation_proposal: dict | None = None
     reply_dispatched = False
     reply_mode = ""
 
     thread = gmail_client.get_thread_messages(service, thread_id)
     if not thread:
         log.warning("Empty conversation for thread %s, skipping.", thread_id)
-        return reservation_updates
+        return reservation_updates, None
 
     latest = thread[-1]
     customer_email = trigger_message.from_email or latest.from_email
@@ -374,7 +468,16 @@ def process_thread(
         if not dry_run:
             gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_NEEDS_HUMAN)
             gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_HANDLED)
-        return reservation_updates       
+        review_item = _build_review_item(
+            thread_id,
+            latest_msg_id,
+            latest,
+            result=None,
+            dry_run=dry_run,
+            reservation_proposal=None,
+            error=str(e),
+        )
+        return reservation_updates, review_item
 
     log.info(
         "  -> category=%s | ready_for_action=%s | action=%s | matched_reservation_id=%s | needs_human=%s | no_reply=%s",
@@ -409,6 +512,11 @@ def process_thread(
                 )
                 created_item["reply_email_nl"] = result.reply_email_nl
                 reservation_updates.append(created_item)
+                reservation_proposal = {
+                    "action": "create",
+                    "reservation": created_item,
+                    "changed_fields": changed_fields,
+                }
 
             elif result.reservatielijst_action == "update" and result.matched_reservation_id:
                 existing = reservation_list.get(result.matched_reservation_id)
@@ -434,6 +542,11 @@ def process_thread(
                     )
                     updated_item["reply_email_nl"] = result.reply_email_nl
                     reservation_updates.append(updated_item)
+                    reservation_proposal = {
+                        "action": "update",
+                        "reservation": updated_item,
+                        "changed_fields": changed_fields,
+                    }
                 else:
                     log.warning("  -> matched_reservation_id not found, no update executed.")
 
@@ -453,6 +566,11 @@ def process_thread(
                     )
                     canceled_item["reply_email_nl"] = result.reply_email_nl
                     reservation_updates.append(canceled_item)
+                    reservation_proposal = {
+                        "action": "cancel",
+                        "reservation": canceled_item,
+                        "changed_fields": ["status"],
+                    }
                 else:
                     log.warning("  -> matched_reservation_id not found, no cancel executed.")
 
@@ -468,7 +586,15 @@ def process_thread(
         print("-" * 70)
         print(result.model_dump_json(indent=2))
         print("=" * 70 + "\n")
-        return reservation_updates
+        review_item = _build_review_item(
+            thread_id,
+            latest_msg_id,
+            latest,
+            result,
+            dry_run,
+            reservation_proposal,
+        )
+        return reservation_updates, review_item
 
     if result.no_reply_needed or result.needs_human or not result.reply_email_nl.strip():
         if result.needs_human:
@@ -487,16 +613,28 @@ def process_thread(
             reply_mode = "als draft aangemaakt"
 
     if reply_dispatched and not reservation_updates:
-        reservation_updates.append(
-            _build_reply_only_update_item(
-                thread_id,
-                result,
-                reply_mode,
-            )
+        reply_only_item = _build_reply_only_update_item(
+            thread_id,
+            result,
+            reply_mode,
         )
+        reservation_updates.append(reply_only_item)
+        reservation_proposal = {
+            "action": "reply_only",
+            "reservation": reply_only_item,
+            "changed_fields": [],
+        }
 
     gmail_client.add_label(service, latest_msg_id, config.GMAIL_LABEL_HANDLED)
-    return reservation_updates
+    review_item = _build_review_item(
+        thread_id,
+        latest_msg_id,
+        latest,
+        result,
+        dry_run,
+        reservation_proposal,
+    )
+    return reservation_updates, review_item
 
 
 def run(
@@ -520,6 +658,7 @@ def run(
     seen_threads = set()
     processed = 0
     reservation_updates_for_run: list[dict] = []
+    review_items_for_run: list[dict] = []
     for msg_id in msg_ids:
         if max_threads is not None and processed >= max_threads:
             break
@@ -527,7 +666,7 @@ def run(
         if parsed.thread_id in seen_threads:
             continue
         seen_threads.add(parsed.thread_id)
-        updates = process_thread(
+        updates, review_item = process_thread(
             service,
             reservation_list,
             parsed.thread_id,
@@ -538,10 +677,13 @@ def run(
             reservation_list_stub=reservation_list_stub,
         )
         reservation_updates_for_run.extend(updates)
+        if review_item:
+            review_items_for_run.append(review_item)
 
         processed += 1        
 
     _write_reservations_update_file(reservation_list, reservation_updates_for_run)
+    _write_review_queue_file(review_items_for_run)
     log.info("Done. %d conversation(s) processed.", processed)    
 
 

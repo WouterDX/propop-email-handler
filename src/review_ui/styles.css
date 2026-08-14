@@ -1,0 +1,144 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+
+.app {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.counts {
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+
+.hidden {
+  display: none;
+}
+
+.empty {
+  margin-top: 28px;
+  padding: 18px;
+  border: 1px solid GrayText;
+  border-radius: 12px;
+}
+
+.card {
+  margin-top: 12px;
+  border: 1px solid GrayText;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid GrayText;
+}
+
+.meta {
+  margin: 6px 0 0;
+  opacity: 0.8;
+}
+
+.pill {
+  border: 1px solid GrayText;
+  border-radius: 999px;
+  padding: 2px 10px;
+  height: fit-content;
+  text-transform: capitalize;
+}
+
+.card-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.panel {
+  border: 1px solid GrayText;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.panel h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.pre-block {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 250px;
+  overflow: auto;
+}
+
+.card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid GrayText;
+}
+
+.nav-group,
+.decision-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+button {
+  border: 1px solid GrayText;
+  background: ButtonFace;
+  color: ButtonText;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#decision-reason {
+  min-width: 240px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid GrayText;
+  background: Field;
+  color: FieldText;
+}
+
+.approve {
+  border-color: #2c8a46;
+}
+
+.reject {
+  border-color: #aa2f2f;
+}
+
+.position {
+  min-width: 52px;
+  text-align: center;
+}

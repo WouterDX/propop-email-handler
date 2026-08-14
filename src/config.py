@@ -89,6 +89,14 @@ OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "myorg e-mailhandler")
 # --- Reservation list (currently a local JSON mock, see reservation_list.py) ---
 RESERVATION_LIST_FILE = os.getenv("RESERVATION_LIST_FILE", str(PROJECT_ROOT / "data" / "reservations.json"))
 RESERVATION_LIST_STUB = os.getenv("RESERVATION_LIST_STUB", "false").lower() == "true"
+REVIEW_QUEUE_FILE = os.getenv(
+    "REVIEW_QUEUE_FILE",
+    str(PROJECT_ROOT / "data" / "mail_review_queue.json"),
+)
+REVIEW_DECISIONS_FILE = os.getenv(
+    "REVIEW_DECISIONS_FILE",
+    str(PROJECT_ROOT / "data" / "mail_review_decisions.json"),
+)
 
 # --- Company data (JSON file, not hardcoded in source code) ---
 # Copy data/company_data_example.json to data/company_data.json and fill in

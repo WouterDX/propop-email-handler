@@ -115,3 +115,31 @@ pixi shell
 cp .env.example .env   # fill the required info in .env, see SETUP.d
 python main.py --dry-run --max 3
 ```
+
+# Local frontend review (Windows desktop)
+After a run of `main.py`, the app now writes a review queue to:
+
+- `data/mail_review_queue.json`
+
+This queue contains one item per processed email thread, with:
+
+- proposed reply (if any)
+- proposed reservation list change (if any)
+- status (`pending`, `approved`, `rejected`)
+
+Start the local review frontend:
+
+```bash
+python src/review_frontend.py
+```
+
+Then open `http://127.0.0.1:8787` in your browser.
+
+In the UI:
+
+- swipe left/right on the card (or use arrow keys) to navigate mails
+- use Approve/Reject to set the decision for the current proposal
+
+Decisions are persisted to:
+
+- `data/mail_review_decisions.json`
