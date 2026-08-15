@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from urllib.parse import unquote, urlparse
 
 import config
@@ -16,6 +19,75 @@ REVIEW_DECISIONS_PATH = Path(config.REVIEW_DECISIONS_FILE)
 STATIC_DIR = Path(__file__).resolve().parent / "review_ui"
 
 _LOCK = Lock()
+_RUN_LOCK = Lock()
+_RUN_STATE = {
+    "running": False,
+    "started_at": None,
+    "ended_at": None,
+    "exit_code": None,
+    "success": None,
+    "log": "",
+}
+
+
+def _append_run_log(chunk: str) -> None:
+    max_chars = 300_000
+    with _RUN_LOCK:
+        _RUN_STATE["log"] += chunk
+        if len(_RUN_STATE["log"]) > max_chars:
+            _RUN_STATE["log"] = _RUN_STATE["log"][-max_chars:]
+
+
+def _run_main_in_background() -> None:
+    src_dir = Path(__file__).resolve().parent
+    project_root = src_dir.parent
+    main_path = src_dir / "main.py"
+    cmd = [sys.executable, str(main_path)]
+
+    with _RUN_LOCK:
+        _RUN_STATE["running"] = True
+        _RUN_STATE["started_at"] = _now_iso()
+        _RUN_STATE["ended_at"] = None
+        _RUN_STATE["exit_code"] = None
+        _RUN_STATE["success"] = None
+        _RUN_STATE["log"] = ""
+
+    _append_run_log(f"$ {' '.join(cmd)}\n")
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(project_root),
+            env=os.environ.copy(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except Exception as exc:
+        with _RUN_LOCK:
+            _RUN_STATE["running"] = False
+            _RUN_STATE["ended_at"] = _now_iso()
+            _RUN_STATE["exit_code"] = -1
+            _RUN_STATE["success"] = False
+            _RUN_STATE["log"] = f"Failed to start main.py: {exc}\n"
+        return
+
+    try:
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                _append_run_log(line)
+        exit_code = proc.wait()
+    except Exception as exc:
+        _append_run_log(f"\nRuntime error while running main.py: {exc}\n")
+        exit_code = -1
+
+    with _RUN_LOCK:
+        _RUN_STATE["running"] = False
+        _RUN_STATE["ended_at"] = _now_iso()
+        _RUN_STATE["exit_code"] = exit_code
+        _RUN_STATE["success"] = exit_code == 0
 
 
 def _now_iso() -> str:
@@ -95,6 +167,25 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._send_json({"items": items, "counts": _review_counts(items)})
             return
 
+        if parsed.path == "/api/run-status":
+            with _RUN_LOCK:
+                payload = {
+                    "running": _RUN_STATE["running"],
+                    "started_at": _RUN_STATE["started_at"],
+                    "ended_at": _RUN_STATE["ended_at"],
+                    "exit_code": _RUN_STATE["exit_code"],
+                    "success": _RUN_STATE["success"],
+                    "has_log": bool(_RUN_STATE["log"]),
+                }
+            self._send_json(payload)
+            return
+
+        if parsed.path == "/api/run-logs":
+            with _RUN_LOCK:
+                log_text = _RUN_STATE["log"]
+            self._send_json({"log": log_text})
+            return
+
         self.send_error(HTTPStatus.NOT_FOUND.value, "Not found")
 
     def do_POST(self):
@@ -105,7 +196,24 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._handle_decision(unquote(path_parts[2]))
             return
 
+        if len(path_parts) == 2 and path_parts[0] == "api" and path_parts[1] == "run":
+            self._handle_run()
+            return
+
         self.send_error(HTTPStatus.NOT_FOUND.value, "Not found")
+
+    def _handle_run(self) -> None:
+        with _RUN_LOCK:
+            if _RUN_STATE["running"]:
+                self._send_json(
+                    {"error": "Run already in progress"},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+        worker = Thread(target=_run_main_in_background, daemon=True)
+        worker.start()
+        self._send_json({"ok": True, "message": "Run started"}, status=HTTPStatus.ACCEPTED)
 
     def _handle_decision(self, review_id: str) -> None:
         try:

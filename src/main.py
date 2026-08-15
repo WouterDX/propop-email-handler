@@ -77,6 +77,15 @@ _QUOTE_HEADER_LINES = (
 )
 
 
+def _safe_console_print(text: str = "") -> None:
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        print(safe_text)
+
+
 def _collect_non_null_field_paths(data: dict, prefix: str = "") -> list[str]:
     paths: list[str] = []
     for key, value in data.items():
@@ -591,11 +600,13 @@ def process_thread(
 
     # --- Compose reply ---
     if dry_run:
-        print("\n" + "=" * 70)
-        print(f"THREAD: {thread_id}  |  FROM: {latest.from_email}  |  SUBJECT: {latest.subject}")
-        print("-" * 70)
-        print(result.model_dump_json(indent=2))
-        print("=" * 70 + "\n")
+        _safe_console_print("\n" + "=" * 70)
+        _safe_console_print(
+            f"THREAD: {thread_id}  |  FROM: {latest.from_email}  |  SUBJECT: {latest.subject}"
+        )
+        _safe_console_print("-" * 70)
+        _safe_console_print(result.model_dump_json(indent=2))
+        _safe_console_print("=" * 70 + "\n")
         review_item = _build_review_item(
             thread_id,
             latest_msg_id,

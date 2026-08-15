@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="nl">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,11 +10,22 @@
     <main class="app">
       <header class="topbar">
         <h1>E-mailreview</h1>
-        <div id="counts" class="counts"></div>
+        <div class="top-actions">
+          <button id="run-btn" type="button">Mailverwerking starten</button>
+          <button id="logs-toggle-btn" type="button">Logboek</button>
+          <span id="run-state" class="run-state">Niet gestart</span>
+        </div>
       </header>
 
+      <div id="counts" class="counts"></div>
+
+      <section id="logs-panel" class="panel hidden logs-panel" aria-live="polite">
+        <h3>Logboek</h3>
+        <pre id="logs-text" class="pre-block">Nog geen logs beschikbaar.</pre>
+      </section>
+
       <section id="empty-state" class="empty hidden">
-        <p>Geen review-items gevonden. Voer eerst de mailverwerking uit om de queue op te bouwen.</p>
+        <p>Geen review-items gevonden. Voer eerst de mailverwerking uit, mails worden ingeladen en verwerkt door AI.</p>
       </section>
 
       <section id="card" class="card hidden" aria-live="polite">
@@ -23,7 +34,7 @@
             <h2 id="mail-subject">-</h2>
             <p id="mail-meta" class="meta">-</p>
           </div>
-          <span id="status-pill" class="pill">pending</span>
+          <span id="status-pill" class="pill">in behandeling</span>
         </div>
 
         <div class="card-body">

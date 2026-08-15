@@ -22,9 +22,30 @@ body {
   gap: 12px;
 }
 
-.counts {
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.run-state {
   font-size: 0.95rem;
   opacity: 0.85;
+}
+
+.counts {
+  margin-top: 8px;
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+
+.logs-panel {
+  margin-top: 12px;
+}
+
+.logs-panel h3 {
+  margin: 0 0 8px;
 }
 
 .hidden {

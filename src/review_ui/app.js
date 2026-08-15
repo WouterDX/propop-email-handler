@@ -1,6 +1,9 @@
 let items = [];
 let currentIndex = 0;
 let dragStartX = null;
+let logsVisible = false;
+let lastHandledRunEnd = null;
+let statusPollTimer = null;
 
 const statusLabels = {
   pending: "in behandeling",
@@ -9,6 +12,11 @@ const statusLabels = {
 };
 
 const countsEl = document.getElementById("counts");
+const runBtn = document.getElementById("run-btn");
+const logsToggleBtn = document.getElementById("logs-toggle-btn");
+const runStateEl = document.getElementById("run-state");
+const logsPanelEl = document.getElementById("logs-panel");
+const logsTextEl = document.getElementById("logs-text");
 const emptyEl = document.getElementById("empty-state");
 const cardEl = document.getElementById("card");
 const subjectEl = document.getElementById("mail-subject");
@@ -68,7 +76,7 @@ function render() {
   const proposal = item.proposal || {};
 
   subjectEl.textContent = mail.subject || "(geen onderwerp)";
-  metaEl.textContent = `${fmt(mail.from_email)} • ${fmt(mail.date)} • thread ${fmt(mail.thread_id)}`;
+  metaEl.textContent = `${fmt(mail.from_email)} • ${fmt(mail.date)} • conversatie ${fmt(mail.thread_id)}`;
   statusPillEl.textContent = statusLabels[item.status] || item.status || "in behandeling";
 
   replyTextEl.textContent = proposal.reply_email_nl || "Geen voorgesteld antwoord.";
@@ -126,6 +134,87 @@ async function loadItems() {
   render();
 }
 
+async function loadLogs() {
+  const response = await fetch("/api/run-logs");
+  if (!response.ok) {
+    throw new Error("Failed to load logs");
+  }
+  const payload = await response.json();
+  logsTextEl.textContent = payload.log || "Nog geen logs beschikbaar.";
+}
+
+function setRunStateText(status) {
+  if (status.running) {
+    runStateEl.textContent = "Bezig met verwerken...";
+    return;
+  }
+  if (status.success === true) {
+    runStateEl.textContent = "Laatste run: geslaagd";
+    return;
+  }
+  if (status.success === false) {
+    runStateEl.textContent = `Laatste run: mislukt (exit ${status.exit_code})`;
+    return;
+  }
+  runStateEl.textContent = "Niet gestart";
+}
+
+async function loadRunStatus() {
+  const response = await fetch("/api/run-status");
+  if (!response.ok) {
+    throw new Error("Failed to load run status");
+  }
+  const status = await response.json();
+
+  runBtn.disabled = Boolean(status.running);
+  setRunStateText(status);
+
+  if (logsVisible && (status.running || status.has_log)) {
+    await loadLogs();
+  }
+
+  if (
+    status.success === true &&
+    status.ended_at &&
+    status.ended_at !== lastHandledRunEnd
+  ) {
+    lastHandledRunEnd = status.ended_at;
+    await loadItems();
+  }
+}
+
+async function startRun() {
+  const response = await fetch("/api/run", { method: "POST" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ error: "Onbekende fout" }));
+    alert(payload.error || "Run starten mislukt");
+    return;
+  }
+  await loadRunStatus();
+}
+
+function toggleLogs() {
+  logsVisible = !logsVisible;
+  logsPanelEl.classList.toggle("hidden", !logsVisible);
+  logsToggleBtn.textContent = logsVisible ? "Logboek verbergen" : "Logboek";
+  if (logsVisible) {
+    loadLogs().catch((error) => {
+      console.error(error);
+      logsTextEl.textContent = "Laden van logs mislukt.";
+    });
+  }
+}
+
+function startStatusPolling() {
+  if (statusPollTimer) return;
+  statusPollTimer = setInterval(() => {
+    loadRunStatus().catch((error) => {
+      console.error(error);
+      runStateEl.textContent = "Status laden mislukt";
+    });
+  }, 1500);
+}
+
 function setupSwipe() {
   cardEl.addEventListener("pointerdown", (event) => {
     dragStartX = event.clientX;
@@ -154,9 +243,21 @@ prevBtn.addEventListener("click", () => go(-1));
 nextBtn.addEventListener("click", () => go(1));
 approveBtn.addEventListener("click", () => decide("approved"));
 rejectBtn.addEventListener("click", () => decide("rejected"));
+runBtn.addEventListener("click", () => {
+  startRun().catch((error) => {
+    console.error(error);
+    runStateEl.textContent = "Run starten mislukt";
+  });
+});
+logsToggleBtn.addEventListener("click", toggleLogs);
 
 setupSwipe();
 loadItems().catch((error) => {
   console.error(error);
   countsEl.textContent = "Laden van review-queue mislukt.";
 });
+loadRunStatus().catch((error) => {
+  console.error(error);
+  runStateEl.textContent = "Status laden mislukt";
+});
+startStatusPolling();
