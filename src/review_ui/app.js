@@ -144,12 +144,27 @@ async function loadLogs() {
 }
 
 function setRunStateText(status) {
+  const loaded = Number.isInteger(status.loaded_messages)
+    ? status.loaded_messages
+    : null;
+  const processed = Number.isInteger(status.processed_messages)
+    ? status.processed_messages
+    : 0;
+
   if (status.running) {
-    runStateEl.textContent = "Bezig met verwerken...";
+    if (loaded !== null) {
+      runStateEl.textContent = `Bezig: ${processed}/${loaded} mails verwerkt`;
+    } else {
+      runStateEl.textContent = `Bezig: ${processed} mails verwerkt`;
+    }
     return;
   }
   if (status.success === true) {
-    runStateEl.textContent = "Laatste run: geslaagd";
+    if (loaded !== null) {
+      runStateEl.textContent = `Laatste run: geslaagd (${processed}/${loaded} mails verwerkt)`;
+    } else {
+      runStateEl.textContent = `Laatste run: geslaagd (${processed} mails verwerkt)`;
+    }
     return;
   }
   if (status.success === false) {

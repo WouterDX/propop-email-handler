@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -27,7 +28,16 @@ _RUN_STATE = {
     "exit_code": None,
     "success": None,
     "log": "",
+    "loaded_messages": None,
+    "processed_messages": 0,
 }
+
+_FOUND_RE = re.compile(r"Found:\s*(\d+)\s+new/unprocessed messages", re.IGNORECASE)
+_DONE_RE = re.compile(r"Done\.\s*(\d+)\s+conversation\(s\) processed", re.IGNORECASE)
+_PROGRESS_RE = re.compile(
+    r"Run progress\s*\|\s*loaded_messages=(\d+)\s*\|\s*processed_messages=(\d+)",
+    re.IGNORECASE,
+)
 
 
 def _append_run_log(chunk: str) -> None:
@@ -36,6 +46,30 @@ def _append_run_log(chunk: str) -> None:
         _RUN_STATE["log"] += chunk
         if len(_RUN_STATE["log"]) > max_chars:
             _RUN_STATE["log"] = _RUN_STATE["log"][-max_chars:]
+
+
+def _update_progress_from_log_line(line: str) -> None:
+    found_match = _FOUND_RE.search(line)
+    done_match = _DONE_RE.search(line)
+    progress_match = _PROGRESS_RE.search(line)
+
+    with _RUN_LOCK:
+        if progress_match:
+            _RUN_STATE["loaded_messages"] = int(progress_match.group(1))
+            _RUN_STATE["processed_messages"] = int(progress_match.group(2))
+            return
+
+        if found_match:
+            _RUN_STATE["loaded_messages"] = int(found_match.group(1))
+            _RUN_STATE["processed_messages"] = 0
+            return
+
+        if "Processing conversation with" in line:
+            _RUN_STATE["processed_messages"] += 1
+            return
+
+        if done_match:
+            _RUN_STATE["processed_messages"] = int(done_match.group(1))
 
 
 def _run_main_in_background() -> None:
@@ -51,6 +85,8 @@ def _run_main_in_background() -> None:
         _RUN_STATE["exit_code"] = None
         _RUN_STATE["success"] = None
         _RUN_STATE["log"] = ""
+        _RUN_STATE["loaded_messages"] = None
+        _RUN_STATE["processed_messages"] = 0
 
     _append_run_log(f"$ {' '.join(cmd)}\n")
 
@@ -78,6 +114,7 @@ def _run_main_in_background() -> None:
         if proc.stdout is not None:
             for line in proc.stdout:
                 _append_run_log(line)
+                _update_progress_from_log_line(line)
         exit_code = proc.wait()
     except Exception as exc:
         _append_run_log(f"\nRuntime error while running main.py: {exc}\n")
@@ -176,6 +213,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     "exit_code": _RUN_STATE["exit_code"],
                     "success": _RUN_STATE["success"],
                     "has_log": bool(_RUN_STATE["log"]),
+                    "loaded_messages": _RUN_STATE["loaded_messages"],
+                    "processed_messages": _RUN_STATE["processed_messages"],
                 }
             self._send_json(payload)
             return

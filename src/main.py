@@ -677,7 +677,8 @@ def run(
     reservation_list = reservation_list_module.JsonFileReservationList()    
 
     msg_ids = gmail_client.list_new_message_ids(service)
-    log.info("Found: %d new/unprocessed messages.", len(msg_ids))    
+    total_loaded_messages = len(msg_ids)
+    log.info("Found: %d new/unprocessed messages.", total_loaded_messages)
 
     seen_threads = set()
     processed = 0
@@ -704,7 +705,12 @@ def run(
         if review_item:
             review_items_for_run.append(review_item)
 
-        processed += 1        
+        processed += 1
+        log.info(
+            "Run progress | loaded_messages=%d | processed_messages=%d",
+            total_loaded_messages,
+            processed,
+        )
 
     _write_reservations_update_file(reservation_list, reservation_updates_for_run)
     _write_review_queue_file(review_items_for_run)
