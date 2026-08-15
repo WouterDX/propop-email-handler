@@ -58,9 +58,10 @@ from ai_agent import analyze_email
 from models import AgentResult, Reservation
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
-log = logging.getLogger("propop")
+log = logging.getLogger(__name__)
 
 _QUOTE_MARKERS = (
     re.compile(r"^Op .{0,80} schreef .{0,80}:\s*$", re.IGNORECASE),
