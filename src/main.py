@@ -32,6 +32,12 @@ Usage:
                         # unreliable stub data and ask missing details
     (set RESERVATION_LIST_STUB=true in .env)
                         # same behavior via environment default
+
+Default CLI behavior can be configured via env vars:
+    MAIN_DEFAULT_DRY_RUN=true|false
+    MAIN_DEFAULT_MAX_THREADS=<int>      # empty/unset means no max
+    MAIN_DEFAULT_DROP_LAST_ORG_REPLY=true|false
+    MAIN_DEFAULT_RESERVATION_LIST_STUB=true|false
 """
 from __future__ import annotations
 
@@ -695,13 +701,21 @@ def run(
 
 def main():
     parser = argparse.ArgumentParser(description="Gmail business handler")
+    parser.set_defaults(
+        dry_run=config.MAIN_DEFAULT_DRY_RUN,
+        drop_last_org_reply=config.MAIN_DEFAULT_DROP_LAST_ORG_REPLY,
+        reservation_list_stub=config.MAIN_DEFAULT_RESERVATION_LIST_STUB,
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Analyze and print results, but do not change anything in Gmail or the reservation list.",
     )
     parser.add_argument(
-        "--max", type=int, default=None, help="Process at most this number of conversations."
+        "--max",
+        type=int,
+        default=config.MAIN_DEFAULT_MAX_THREADS,
+        help="Process at most this number of conversations.",
     )
     parser.add_argument(
         "--drop-last-org-reply",
@@ -711,7 +725,6 @@ def main():
             "last message from AI analysis context."
         ),
     )
-    parser.set_defaults(reservation_list_stub=config.RESERVATION_LIST_STUB)
     reservation_stub_group = parser.add_mutually_exclusive_group()
     reservation_stub_group.add_argument(
         "--reservation-list-stub",

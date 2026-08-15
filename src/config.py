@@ -108,3 +108,16 @@ COMPANY_DATA_FILE = os.getenv(
 COMPANY_DATA_EXAMPLE_FILE = str(PROJECT_ROOT / "data" / "company_data_example.json")
 
 INSTRUCTIONS_FILE = os.getenv("INSTRUCTIONS_FILE", str(PROJECT_ROOT / "data" / "instructions_email_handler.md"))
+
+# --- main.py CLI defaults ---
+# These values control defaults when flags are omitted.
+MAIN_DEFAULT_DRY_RUN = os.getenv("MAIN_DEFAULT_DRY_RUN", "false").lower() == "true"
+_main_default_max_threads = os.getenv("MAIN_DEFAULT_MAX_THREADS", "").strip()
+MAIN_DEFAULT_MAX_THREADS = int(_main_default_max_threads) if _main_default_max_threads else None
+MAIN_DEFAULT_DROP_LAST_ORG_REPLY = (
+    os.getenv("MAIN_DEFAULT_DROP_LAST_ORG_REPLY", "false").lower() == "true"
+)
+MAIN_DEFAULT_RESERVATION_LIST_STUB = (
+    os.getenv("MAIN_DEFAULT_RESERVATION_LIST_STUB", str(RESERVATION_LIST_STUB)).lower()
+    == "true"
+)

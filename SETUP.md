@@ -182,6 +182,16 @@ Optional Gmail search scope in `.env`:
 - You can use any Gmail query syntax here (for example labels, categories,
   inclusions/exclusions such as `in:anywhere -in:spam -in:trash`).
 
+Optional `main.py` default arguments in `.env`:
+- `MAIN_DEFAULT_DRY_RUN=true|false`
+- `MAIN_DEFAULT_MAX_THREADS=<int>` (empty/unset means no limit)
+- `MAIN_DEFAULT_DROP_LAST_ORG_REPLY=true|false`
+- `MAIN_DEFAULT_RESERVATION_LIST_STUB=true|false`
+
+These values only set defaults when corresponding CLI flags are omitted.
+Any explicit CLI flags (for example `--dry-run`, `--max`,
+`--drop-last-org-reply`, `--reservation-list-stub`) still override them.
+
 ## 7. Run repeatedly
 
 It's recommended to run this script manually once every day for incoming emails.
