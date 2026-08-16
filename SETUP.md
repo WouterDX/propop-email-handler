@@ -14,7 +14,7 @@ locally, on top of what `test_gmailaccess.py` already did.
 | `reservation_list.py` | Interface to the reservation list + local JSON test version |
 | `ai_agent.py` | Calls OpenRouter to classify + write a reply |
 | `main.py` | Connects everything: fetches emails, calls AI, creates drafts |
-| `instructions_email_handler.md` | Your business instructions (unchanged) — passed literally to the AI |
+| `instructies_agent.md` | Your business instructions (unchanged) — passed literally to the AI |
 | `data/company_data_example.json` | Anonymized example of structured company data (shows, URLs, gift voucher info) |
 
 ## 1. Python environment
@@ -132,14 +132,14 @@ Track usage at https://openrouter.ai/activity.
 ## 4. Company data JSON (required)
 
 Business-specific data is stored at two places:
--  `data/instructions_email_handler.md`: instructions that can be read by a human or ai
+-  `data/instructies_agent.md`: instructions that can be read by a human or ai
 -  `data/company_data.json`: data for the company in a clear structure, that can be read by computer software.
 
 The easiest is to read the first file with instructions, and modify it for your purposes (this can be done in any language you choose).
 Once you are done, create the second file as follows:
 
 1. Copy the example file `data/company_data_example.json` to `data/company_data.json`:   
-2. Ask an AI chatbot like chatgpt to modify `data/company_data.json` using `data/instructions_email_handler.md`. This is an easy job for an AI!
+2. Ask an AI chatbot like chatgpt to modify `data/company_data.json` using `data/instructies_agent.md`. This is an easy job for an AI!
 3. Compare both files to see if the new output is correct.
 4. Optional: if you store this file elsewhere, set `COMPANY_DATA_FILE` in `.env`.
 
@@ -156,7 +156,7 @@ On first run, a browser window opens so you can sign in to your
 Google account and grant permission (just like with `test_gmailaccess.py`).
 
 Review the JSON output: is the classification correct? Is the proposed reply
-appropriate? If needed, adjust `instructions_email_handler.md` (the AI reads
+appropriate? If needed, adjust `instructies_agent.md` (the AI reads
 this file again on every run) and try again.
 
 ## 6. Run live — with drafts, not auto-send

@@ -1,6 +1,6 @@
 # Propop email handler
 
-The app in this repo handles email for a small theater, according to rules specified (in Dutch) in `instructions_email_handler.md`: 
+The app in this repo handles email for a small theater, according to rules specified (in Dutch) in `instructies_agent.md`:
 it mainly handles reservations but can also deal with custom requests, and can deal both with email and structured reservations coming from website forms.
 
 # Initial setup

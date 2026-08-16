@@ -218,7 +218,7 @@ def _load_instructions() -> str:
     if not path.exists():
         raise FileNotFoundError(
             f"Kan de instructietekst niet vinden op {path}. "
-            "Zorg dat instructions_email_handler.md naast main.py staat, "
+            "Zorg dat instructies_agent.md in de data-map staat, "
             "of stel INSTRUCTIONS_FILE in via .env."
         )
     return path.read_text(encoding="utf-8")

@@ -106,7 +106,7 @@ COMPANY_DATA_FILE = os.getenv(
 )
 COMPANY_DATA_EXAMPLE_FILE = str(PROJECT_ROOT / "data" / "company_data_example.json")
 
-INSTRUCTIONS_FILE = os.getenv("INSTRUCTIONS_FILE", str(PROJECT_ROOT / "data" / "instructions_email_handler.md"))
+INSTRUCTIONS_FILE = os.getenv("INSTRUCTIONS_FILE", str(PROJECT_ROOT / "data" / "instructies_agent.md"))
 
 # --- main.py CLI defaults ---
 # These values control defaults when flags are omitted.

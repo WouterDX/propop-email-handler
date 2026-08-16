@@ -31,7 +31,7 @@ Dat past niet in het Reservation-schema (er is geen voorstelling/speeldatum/
 type gekozen) en zou als reservatie-record in de reservatielijst enkel
 lege/foute records opleveren. Dit script schrijft die berichten daarom naar
 een apart bestand (contact_berichten.json), zodat een medewerker (of een
-volgende verwerkingsstap, zie ook instructions_email_handler.md onder
+volgende verwerkingsstap, zie ook instructies_agent.md onder
 "Andere vragen dan reservaties") ze met de hand kan bekijken.
 
 Datakwaliteit
@@ -69,7 +69,7 @@ from models import Reservation  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Referentielijst voorstellingen (uit instructions_email_handler.md), gebruikt
+# Referentielijst voorstellingen (uit instructies_agent.md), gebruikt
 # om titels te normaliseren naar de officiële naam.
 # ---------------------------------------------------------------------------
 VOORSTELLINGEN_ALIASSEN: dict[str, str] = {}
