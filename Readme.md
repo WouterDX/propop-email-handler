@@ -117,9 +117,9 @@ python main.py --dry-run --max 3
 ```
 
 # Local frontend review (Windows desktop)
-After a run of `main.py`, the app now writes a review queue to:
+After a run of `main.py`, the app writes all run/review/judge data to one unified file:
 
-- `data/mail_review_queue.json`
+- `data/mail_pipeline_data.json`
 
 This queue contains one item per processed email thread, with:
 
@@ -140,6 +140,53 @@ In the UI:
 - swipe left/right on the card (or use arrow keys) to navigate mails
 - use Approve/Reject to set the decision for the current proposal
 
-Decisions are persisted to:
+Review decisions are written back into the same unified file.
 
-- `data/mail_review_decisions.json`
+## LLM judge workflow (separate run)
+
+The project now supports an offline evaluation loop where an LLM compares the AI draft reply with the real human follow-up.
+
+### 1) Generate reference pairs from a main run
+
+Run `main.py` with drop-last mode:
+
+```bash
+python src/main.py --dry-run --drop-last-org-reply
+```
+
+For each thread where organisation replies are dropped after the last customer mail, the app stores:
+
+- the exact conversation context and user prompt shown to the AI
+- the dropped human reply text (reference answer)
+- the AI output (including `extracted` JSON and `reply_email_nl`)
+
+Saved in the same unified file (`judge_reference` field per review item).
+
+### 2) Run the standalone judge
+
+```bash
+python src/llm_judge.py --max 20
+```
+
+You can also explicitly choose the JSON input file:
+
+```bash
+python src/llm_judge.py --input-file data/mail_pipeline_data.json --max 20
+```
+
+This compares AI vs human on:
+
+- factual alignment: are extracted facts reflected in the human reply?
+- tone/response quality: does AI ask too much or add irrelevant details?
+
+Results are written back to the same unified file (`judge_result` field per review item).
+
+### 3) Optional instruction-text review
+
+To also ask the judge for instruction improvements:
+
+```bash
+python src/llm_judge.py --include-instruction-review
+```
+
+This adds concrete suggested edits that may explain why AI output differs from human output.

@@ -53,8 +53,9 @@ from pathlib import Path
 
 import config
 import gmail_client
+import pipeline_store
 import reservation_list as reservation_list_module
-from ai_agent import analyze_email
+from ai_agent import analyze_email, build_analysis_user_prompt
 from models import AgentResult, Reservation
 
 logging.basicConfig(
@@ -151,70 +152,110 @@ def _build_update_note(
     return basis
 
 
-def _reservations_update_path(reservation_list) -> Path:
-    source_path = Path(getattr(reservation_list, "path", config.RESERVATION_LIST_FILE))
-    return source_path.parent / "reservations_update.json"
-
-
-def _write_reservations_update_file(reservation_list, updated_items: list[dict]):
-    if not updated_items:
-        return
-    output_path = _reservations_update_path(reservation_list)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(updated_items, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    log.info("Wrote %d updated reservation item(s) to %s", len(updated_items), output_path)
-
-
-def _review_queue_path() -> Path:
-    return Path(config.REVIEW_QUEUE_FILE)
-
-
 def _build_review_id(thread_id: str, message_id: str) -> str:
     return f"{thread_id}:{message_id}"
 
 
-def _write_review_queue_file(review_items: list[dict]):
-    if not review_items:
-        return
-
-    output_path = _review_queue_path()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    existing_items: list[dict] = []
-    if output_path.exists():
-        try:
-            existing_items = json.loads(output_path.read_text(encoding="utf-8"))
-        except Exception:
-            existing_items = []
-
-    existing_by_id = {
-        item.get("review_id"): item
-        for item in existing_items
-        if isinstance(item, dict) and item.get("review_id")
+def _serialize_message_for_judge(message) -> dict:
+    return {
+        "gmail_message_id": getattr(message, "gmail_msg_id", None),
+        "from_name": getattr(message, "from_name", ""),
+        "from_email": getattr(message, "from_email", ""),
+        "to": getattr(message, "to", ""),
+        "subject": getattr(message, "subject", ""),
+        "date": getattr(message, "date", None),
+        "body_text": getattr(message, "body_text", "") or "",
+        "body_text_full": getattr(message, "body_text_full", None),
     }
 
-    for review_item in review_items:
-        review_id = review_item.get("review_id")
-        previous = existing_by_id.get(review_id)
-        if previous and previous.get("status") in {"approved", "rejected"}:
-            review_item["status"] = previous.get("status")
-            review_item["decision_reason"] = previous.get("decision_reason")
-            review_item["decided_at"] = previous.get("decided_at")
-        existing_by_id[review_id] = review_item
 
-    merged = sorted(
-        existing_by_id.values(),
-        key=lambda item: item.get("created_at") or "",
-        reverse=True,
+def _build_llm_judge_reference_item(
+    thread_id: str,
+    latest_msg_id: str,
+    thread_for_analysis: list,
+    removed_messages: list,
+    candidates,
+    own_email_hint: str,
+    result: AgentResult,
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    human_reply_text = "\n\n---\n\n".join(
+        (
+            getattr(message, "body_text_full", None)
+            or getattr(message, "body_text", "")
+            or ""
+        ).strip()
+        for message in removed_messages
+        if (
+            getattr(message, "body_text_full", None)
+            or getattr(message, "body_text", "")
+            or ""
+        ).strip()
     )
-    output_path.write_text(
-        json.dumps(merged, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    log.info("Wrote %d review queue item(s) to %s", len(review_items), output_path)
+
+    return {
+        "review_id": _build_review_id(thread_id, latest_msg_id),
+        "created_at": now,
+        "thread_id": thread_id,
+        "trigger_message_id": latest_msg_id,
+        "ai_input": {
+            "own_email_hint": own_email_hint,
+            "thread_messages": [
+                _serialize_message_for_judge(message) for message in thread_for_analysis
+            ],
+            "user_prompt": build_analysis_user_prompt(
+                thread_for_analysis,
+                candidates,
+                own_email_hint,
+            ),
+        },
+        "human_reference": {
+            "messages": [
+                _serialize_message_for_judge(message) for message in removed_messages
+            ],
+            "answer_text": human_reply_text,
+        },
+        "ai_output": {
+            "category": result.category,
+            "reservation_type": result.reservation_type,
+            "extracted": result.extracted,
+            "needs_human": result.needs_human,
+            "needs_human_reason": result.needs_human_reason,
+            "no_reply_needed": result.no_reply_needed,
+            "reply_email_nl": result.reply_email_nl,
+            "interne_notitie": result.interne_notitie,
+        },
+    }
+
+
+def _build_pipeline_item(
+    review_item: dict,
+    reservation_updates: list[dict],
+    judge_reference: dict | None,
+    drop_last_org_reply: bool,
+    reservation_list_stub: bool,
+) -> dict:
+    run_meta = {
+        "mode": review_item.get("run_mode"),
+        "error": review_item.get("error"),
+        "drop_last_org_reply": drop_last_org_reply,
+        "reservation_list_stub": reservation_list_stub,
+    }
+
+    return {
+        "review_id": review_item.get("review_id"),
+        "status": review_item.get("status", "pending"),
+        "decision_reason": review_item.get("decision_reason"),
+        "decided_at": review_item.get("decided_at"),
+        "created_at": review_item.get("created_at"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "run": run_meta,
+        "mail": review_item.get("mail") or {},
+        "proposal": review_item.get("proposal") or {},
+        "reservation_updates": reservation_updates,
+        "judge_reference": judge_reference,
+        "judge_result": None,
+    }
 
 
 def _build_review_item(
@@ -427,7 +468,7 @@ def process_thread(
     dry_run: bool,
     drop_last_org_reply: bool = False,
     reservation_list_stub: bool = False,
-) -> tuple[list[dict], dict | None]:
+) -> tuple[list[dict], dict | None, dict | None]:
     reservation_updates: list[dict] = []
     reservation_proposal: dict | None = None
     reply_dispatched = False
@@ -436,7 +477,7 @@ def process_thread(
     thread = gmail_client.get_thread_messages(service, thread_id)
     if not thread:
         log.warning("Empty conversation for thread %s, skipping.", thread_id)
-        return reservation_updates, None
+        return reservation_updates, None, None
 
     latest = thread[-1]
     customer_email = trigger_message.from_email or latest.from_email
@@ -446,6 +487,7 @@ def process_thread(
     own_email_hint = trigger_message.to.split(",")[0].strip() if trigger_message.to else ""
 
     thread_for_analysis = thread
+    removed_messages = []
     if drop_last_org_reply:
         organisation_emails = _extract_email_addresses(trigger_message.to)
         filtered_thread, removed_messages = _drop_org_messages_after_last_customer(
@@ -497,7 +539,7 @@ def process_thread(
             reservation_proposal=None,
             error=str(e),
         )
-        return reservation_updates, review_item
+        return reservation_updates, review_item, None
 
     log.info(
         "  -> category=%s | ready_for_action=%s | action=%s | matched_reservation_id=%s | needs_human=%s | no_reply=%s",
@@ -617,7 +659,18 @@ def process_thread(
             dry_run,
             reservation_proposal,
         )
-        return reservation_updates, review_item
+        judge_reference = None
+        if drop_last_org_reply and removed_messages:
+            judge_reference = _build_llm_judge_reference_item(
+                thread_id,
+                latest_msg_id,
+                thread_for_analysis,
+                removed_messages,
+                candidates,
+                own_email_hint,
+                result,
+            )
+        return reservation_updates, review_item, judge_reference
 
     if result.no_reply_needed or result.needs_human or not result.reply_email_nl.strip():
         if result.needs_human:
@@ -658,7 +711,18 @@ def process_thread(
         dry_run,
         reservation_proposal,
     )
-    return reservation_updates, review_item
+    judge_reference = None
+    if drop_last_org_reply and removed_messages:
+        judge_reference = _build_llm_judge_reference_item(
+            thread_id,
+            latest_msg_id,
+            thread_for_analysis,
+            removed_messages,
+            candidates,
+            own_email_hint,
+            result,
+        )
+    return reservation_updates, review_item, judge_reference
 
 
 def run(
@@ -682,8 +746,6 @@ def run(
 
     seen_threads = set()
     processed = 0
-    reservation_updates_for_run: list[dict] = []
-    review_items_for_run: list[dict] = []
     for msg_id in msg_ids:
         if max_threads is not None and processed >= max_threads:
             break
@@ -691,7 +753,7 @@ def run(
         if parsed.thread_id in seen_threads:
             continue
         seen_threads.add(parsed.thread_id)
-        updates, review_item = process_thread(
+        updates, review_item, judge_reference = process_thread(
             service,
             reservation_list,
             parsed.thread_id,
@@ -701,9 +763,15 @@ def run(
             drop_last_org_reply=drop_last_org_reply,
             reservation_list_stub=reservation_list_stub,
         )
-        reservation_updates_for_run.extend(updates)
         if review_item:
-            review_items_for_run.append(review_item)
+            pipeline_item = _build_pipeline_item(
+                review_item,
+                updates,
+                judge_reference,
+                drop_last_org_reply,
+                reservation_list_stub,
+            )
+            pipeline_store.upsert_pipeline_items([pipeline_item])
 
         processed += 1
         log.info(
@@ -712,8 +780,7 @@ def run(
             processed,
         )
 
-    _write_reservations_update_file(reservation_list, reservation_updates_for_run)
-    _write_review_queue_file(review_items_for_run)
+    log.info("Unified pipeline data file: %s", config.PIPELINE_DATA_FILE)
     log.info("Done. %d conversation(s) processed.", processed)    
 
 

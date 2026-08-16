@@ -397,6 +397,21 @@ def _format_candidates(candidates: list[Reservation]) -> str:
     )
 
 
+def build_analysis_user_prompt(
+    thread: list[ParsedEmail],
+    candidates: list[Reservation],
+    own_email_hint: str = "",
+) -> str:
+    """Build the exact user prompt payload used for email analysis."""
+    return (
+        "GESPREK (oudste bericht eerst):\n\n"
+        f"{_format_thread_for_prompt(thread, own_email_hint)}\n\n"
+        "KANDIDAAT-RESERVATIES VOOR DIT E-MAILADRES:\n"
+        f"{_format_candidates(candidates)}\n\n"
+        "Geef nu het JSON-antwoord volgens het afgesproken schema."
+    )
+
+
 def _call_openrouter(messages: list[dict]) -> str:
     if not config.OPENROUTER_API_KEY:
         raise RuntimeError(
@@ -600,13 +615,7 @@ def analyze_email(
     """Hoofdfunctie: geef het volledige gesprek + reservatielijst-kandidaten
     mee aan het taalmodel en krijg een gevalideerd AgentResult terug."""
     system_prompt = build_system_prompt()
-    user_prompt = (
-        "GESPREK (oudste bericht eerst):\n\n"
-        f"{_format_thread_for_prompt(thread, own_email_hint)}\n\n"
-        "KANDIDAAT-RESERVATIES VOOR DIT E-MAILADRES:\n"
-        f"{_format_candidates(candidates)}\n\n"
-        "Geef nu het JSON-antwoord volgens het afgesproken schema."
-    )
+    user_prompt = build_analysis_user_prompt(thread, candidates, own_email_hint)
 
     messages = [
         {"role": "system", "content": system_prompt},

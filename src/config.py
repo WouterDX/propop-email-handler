@@ -11,7 +11,9 @@ from pathlib import Path
 # --- Load .env (optional, only if python-dotenv is installed) ---
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    # Use override=True so a newly edited .env is reapplied on each fresh
+    # process start, even if parent processes exported older values.
+    load_dotenv(override=True)
 except ImportError:
     pass
 
@@ -89,14 +91,11 @@ OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "myorg e-mailhandler")
 # --- Reservation list (currently a local JSON mock, see reservation_list.py) ---
 RESERVATION_LIST_FILE = os.getenv("RESERVATION_LIST_FILE", str(PROJECT_ROOT / "data" / "reservations.json"))
 RESERVATION_LIST_STUB = os.getenv("RESERVATION_LIST_STUB", "false").lower() == "true"
-REVIEW_QUEUE_FILE = os.getenv(
-    "REVIEW_QUEUE_FILE",
-    str(PROJECT_ROOT / "data" / "mail_review_queue.json"),
+PIPELINE_DATA_FILE = os.getenv(
+    "PIPELINE_DATA_FILE",
+    str(PROJECT_ROOT / "data" / "mail_pipeline_data.json"),
 )
-REVIEW_DECISIONS_FILE = os.getenv(
-    "REVIEW_DECISIONS_FILE",
-    str(PROJECT_ROOT / "data" / "mail_review_decisions.json"),
-)
+OPENROUTER_JUDGE_MODEL = os.getenv("OPENROUTER_JUDGE_MODEL", OPENROUTER_MODEL)
 
 # --- Company data (JSON file, not hardcoded in source code) ---
 # Copy data/company_data_example.json to data/company_data.json and fill in

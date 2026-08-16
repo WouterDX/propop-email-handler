@@ -13,23 +13,25 @@ from threading import Lock, Thread
 from urllib.parse import unquote, urlparse
 
 import config
+import pipeline_store
 
 
-REVIEW_QUEUE_PATH = Path(config.REVIEW_QUEUE_FILE)
-REVIEW_DECISIONS_PATH = Path(config.REVIEW_DECISIONS_FILE)
+PIPELINE_DATA_PATH = Path(config.PIPELINE_DATA_FILE)
 STATIC_DIR = Path(__file__).resolve().parent / "review_ui"
 
 _LOCK = Lock()
 _RUN_LOCK = Lock()
 _RUN_STATE = {
     "running": False,
+    "task": None,
+    "task_label": None,
     "started_at": None,
     "ended_at": None,
     "exit_code": None,
     "success": None,
     "log": "",
-    "loaded_messages": None,
-    "processed_messages": 0,
+    "total_items": None,
+    "processed_items": 0,
 }
 
 _FOUND_RE = re.compile(r"Found:\s*(\d+)\s+new/unprocessed messages", re.IGNORECASE)
@@ -38,6 +40,8 @@ _PROGRESS_RE = re.compile(
     r"Run progress\s*\|\s*loaded_messages=(\d+)\s*\|\s*processed_messages=(\d+)",
     re.IGNORECASE,
 )
+_JUDGE_FOUND_RE = re.compile(r"Judging\s+(\d+)\s+reference item\(s\)", re.IGNORECASE)
+_JUDGE_PROGRESS_RE = re.compile(r"\[(\d+)\/(\d+)\]\s+Judged\s+", re.IGNORECASE)
 
 
 def _append_run_log(chunk: str) -> None:
@@ -52,41 +56,56 @@ def _update_progress_from_log_line(line: str) -> None:
     found_match = _FOUND_RE.search(line)
     done_match = _DONE_RE.search(line)
     progress_match = _PROGRESS_RE.search(line)
+    judge_found_match = _JUDGE_FOUND_RE.search(line)
+    judge_progress_match = _JUDGE_PROGRESS_RE.search(line)
 
     with _RUN_LOCK:
+        task = _RUN_STATE.get("task")
+
+        if task == "judge":
+            if judge_progress_match:
+                _RUN_STATE["processed_items"] = int(judge_progress_match.group(1))
+                _RUN_STATE["total_items"] = int(judge_progress_match.group(2))
+                return
+            if judge_found_match:
+                _RUN_STATE["total_items"] = int(judge_found_match.group(1))
+                _RUN_STATE["processed_items"] = 0
+                return
+            return
+
         if progress_match:
-            _RUN_STATE["loaded_messages"] = int(progress_match.group(1))
-            _RUN_STATE["processed_messages"] = int(progress_match.group(2))
+            _RUN_STATE["total_items"] = int(progress_match.group(1))
+            _RUN_STATE["processed_items"] = int(progress_match.group(2))
             return
 
         if found_match:
-            _RUN_STATE["loaded_messages"] = int(found_match.group(1))
-            _RUN_STATE["processed_messages"] = 0
+            _RUN_STATE["total_items"] = int(found_match.group(1))
+            _RUN_STATE["processed_items"] = 0
             return
 
         if "Processing conversation with" in line:
-            _RUN_STATE["processed_messages"] += 1
+            _RUN_STATE["processed_items"] += 1
             return
 
         if done_match:
-            _RUN_STATE["processed_messages"] = int(done_match.group(1))
+            _RUN_STATE["processed_items"] = int(done_match.group(1))
 
 
-def _run_main_in_background() -> None:
+def _run_command_in_background(cmd: list[str], task: str, task_label: str) -> None:
     src_dir = Path(__file__).resolve().parent
     project_root = src_dir.parent
-    main_path = src_dir / "main.py"
-    cmd = [sys.executable, str(main_path)]
 
     with _RUN_LOCK:
         _RUN_STATE["running"] = True
+        _RUN_STATE["task"] = task
+        _RUN_STATE["task_label"] = task_label
         _RUN_STATE["started_at"] = _now_iso()
         _RUN_STATE["ended_at"] = None
         _RUN_STATE["exit_code"] = None
         _RUN_STATE["success"] = None
         _RUN_STATE["log"] = ""
-        _RUN_STATE["loaded_messages"] = None
-        _RUN_STATE["processed_messages"] = 0
+        _RUN_STATE["total_items"] = None
+        _RUN_STATE["processed_items"] = 0
 
     _append_run_log(f"$ {' '.join(cmd)}\n")
 
@@ -104,10 +123,11 @@ def _run_main_in_background() -> None:
     except Exception as exc:
         with _RUN_LOCK:
             _RUN_STATE["running"] = False
+            _RUN_STATE["task"] = None
             _RUN_STATE["ended_at"] = _now_iso()
             _RUN_STATE["exit_code"] = -1
             _RUN_STATE["success"] = False
-            _RUN_STATE["log"] = f"Failed to start main.py: {exc}\n"
+            _RUN_STATE["log"] = f"Failed to start {task_label}: {exc}\n"
         return
 
     try:
@@ -117,14 +137,35 @@ def _run_main_in_background() -> None:
                 _update_progress_from_log_line(line)
         exit_code = proc.wait()
     except Exception as exc:
-        _append_run_log(f"\nRuntime error while running main.py: {exc}\n")
+        _append_run_log(f"\nRuntime error while running {task_label}: {exc}\n")
         exit_code = -1
 
     with _RUN_LOCK:
         _RUN_STATE["running"] = False
+        _RUN_STATE["task"] = None
         _RUN_STATE["ended_at"] = _now_iso()
         _RUN_STATE["exit_code"] = exit_code
         _RUN_STATE["success"] = exit_code == 0
+
+
+def _run_main_in_background() -> None:
+    src_dir = Path(__file__).resolve().parent
+    main_path = src_dir / "main.py"
+    _run_command_in_background(
+        [sys.executable, str(main_path)],
+        task="main",
+        task_label="Mailverwerking",
+    )
+
+
+def _run_judge_in_background() -> None:
+    src_dir = Path(__file__).resolve().parent
+    judge_path = src_dir / "llm_judge.py"
+    _run_command_in_background(
+        [sys.executable, str(judge_path)],
+        task="judge",
+        task_label="LLM judge",
+    )
 
 
 def _now_iso() -> str:
@@ -200,7 +241,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/reviews":
             with _LOCK:
-                items = _read_json_list(REVIEW_QUEUE_PATH)
+                items = [
+                    item
+                    for item in pipeline_store.read_pipeline_items(PIPELINE_DATA_PATH)
+                    if isinstance(item.get("mail"), dict) and isinstance(item.get("proposal"), dict)
+                ]
             self._send_json({"items": items, "counts": _review_counts(items)})
             return
 
@@ -208,13 +253,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             with _RUN_LOCK:
                 payload = {
                     "running": _RUN_STATE["running"],
+                    "task": _RUN_STATE["task"],
+                    "task_label": _RUN_STATE["task_label"],
                     "started_at": _RUN_STATE["started_at"],
                     "ended_at": _RUN_STATE["ended_at"],
                     "exit_code": _RUN_STATE["exit_code"],
                     "success": _RUN_STATE["success"],
                     "has_log": bool(_RUN_STATE["log"]),
-                    "loaded_messages": _RUN_STATE["loaded_messages"],
-                    "processed_messages": _RUN_STATE["processed_messages"],
+                    "total_items": _RUN_STATE["total_items"],
+                    "processed_items": _RUN_STATE["processed_items"],
                 }
             self._send_json(payload)
             return
@@ -239,6 +286,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._handle_run()
             return
 
+        if len(path_parts) == 2 and path_parts[0] == "api" and path_parts[1] == "judge":
+            self._handle_judge()
+            return
+
         self.send_error(HTTPStatus.NOT_FOUND.value, "Not found")
 
     def _handle_run(self) -> None:
@@ -253,6 +304,19 @@ class ReviewHandler(BaseHTTPRequestHandler):
         worker = Thread(target=_run_main_in_background, daemon=True)
         worker.start()
         self._send_json({"ok": True, "message": "Run started"}, status=HTTPStatus.ACCEPTED)
+
+    def _handle_judge(self) -> None:
+        with _RUN_LOCK:
+            if _RUN_STATE["running"]:
+                self._send_json(
+                    {"error": "Run already in progress"},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+        worker = Thread(target=_run_judge_in_background, daemon=True)
+        worker.start()
+        self._send_json({"ok": True, "message": "Judge started"}, status=HTTPStatus.ACCEPTED)
 
     def _handle_decision(self, review_id: str) -> None:
         try:
@@ -279,7 +343,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         now = _now_iso()
 
         with _LOCK:
-            items = _read_json_list(REVIEW_QUEUE_PATH)
+            items = pipeline_store.read_pipeline_items(PIPELINE_DATA_PATH)
             target = next((item for item in items if item.get("review_id") == review_id), None)
             if not target:
                 self._send_json({"error": "Review item not found"}, status=HTTPStatus.NOT_FOUND)
@@ -289,31 +353,19 @@ class ReviewHandler(BaseHTTPRequestHandler):
             target["decision_reason"] = reason or None
             target["decided_at"] = now
             target["updated_at"] = now
-            _write_json(REVIEW_QUEUE_PATH, items)
-
-            decisions = _read_json_list(REVIEW_DECISIONS_PATH)
-            decisions.append(
-                {
-                    "review_id": review_id,
-                    "decision": decision,
-                    "reason": reason or None,
-                    "decided_at": now,
-                }
-            )
-            _write_json(REVIEW_DECISIONS_PATH, decisions)
+            pipeline_store.write_pipeline_items(items, PIPELINE_DATA_PATH)
 
         self._send_json({"ok": True, "review_id": review_id, "decision": decision})
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8787):
-    REVIEW_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not REVIEW_QUEUE_PATH.exists():
-        _write_json(REVIEW_QUEUE_PATH, [])
+    PIPELINE_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not PIPELINE_DATA_PATH.exists():
+        pipeline_store.write_pipeline_items([], PIPELINE_DATA_PATH)
 
     server = ThreadingHTTPServer((host, port), ReviewHandler)
     print(f"Review frontend running at http://{host}:{port}")
-    print(f"Queue file: {REVIEW_QUEUE_PATH}")
-    print(f"Decisions file: {REVIEW_DECISIONS_PATH}")
+    print(f"Data file: {PIPELINE_DATA_PATH}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

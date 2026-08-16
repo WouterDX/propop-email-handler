@@ -4,6 +4,7 @@ let dragStartX = null;
 let logsVisible = false;
 let lastHandledRunEnd = null;
 let statusPollTimer = null;
+let lastObservedProcessed = null;
 
 const statusLabels = {
   pending: "in behandeling",
@@ -13,6 +14,7 @@ const statusLabels = {
 
 const countsEl = document.getElementById("counts");
 const runBtn = document.getElementById("run-btn");
+const judgeBtn = document.getElementById("judge-btn");
 const logsToggleBtn = document.getElementById("logs-toggle-btn");
 const runStateEl = document.getElementById("run-state");
 const logsPanelEl = document.getElementById("logs-panel");
@@ -124,13 +126,28 @@ async function decide(decision) {
 }
 
 async function loadItems() {
+  const previousReviewId = items[currentIndex]?.review_id;
+
   const response = await fetch("/api/reviews");
   if (!response.ok) {
     throw new Error("Failed to load reviews");
   }
   const payload = await response.json();
   items = payload.items || [];
-  currentIndex = 0;
+
+  if (!items.length) {
+    currentIndex = 0;
+  } else if (previousReviewId) {
+    const preservedIndex = items.findIndex((item) => item.review_id === previousReviewId);
+    if (preservedIndex >= 0) {
+      currentIndex = preservedIndex;
+    } else {
+      currentIndex = Math.min(currentIndex, items.length - 1);
+    }
+  } else {
+    currentIndex = Math.min(currentIndex, items.length - 1);
+  }
+
   render();
 }
 
@@ -144,31 +161,32 @@ async function loadLogs() {
 }
 
 function setRunStateText(status) {
-  const loaded = Number.isInteger(status.loaded_messages)
-    ? status.loaded_messages
+  const total = Number.isInteger(status.total_items)
+    ? status.total_items
     : null;
-  const processed = Number.isInteger(status.processed_messages)
-    ? status.processed_messages
+  const processed = Number.isInteger(status.processed_items)
+    ? status.processed_items
     : 0;
+  const taskLabel = status.task_label || "Taak";
 
   if (status.running) {
-    if (loaded !== null) {
-      runStateEl.textContent = `Bezig: ${processed}/${loaded} mails verwerkt`;
+    if (total !== null) {
+      runStateEl.textContent = `Bezig (${taskLabel}): ${processed}/${total}`;
     } else {
-      runStateEl.textContent = `Bezig: ${processed} mails verwerkt`;
+      runStateEl.textContent = `Bezig (${taskLabel})`;
     }
     return;
   }
   if (status.success === true) {
-    if (loaded !== null) {
-      runStateEl.textContent = `Laatste run: geslaagd (${processed}/${loaded} mails verwerkt)`;
+    if (total !== null) {
+      runStateEl.textContent = `Laatste run (${taskLabel}): geslaagd (${processed}/${total})`;
     } else {
-      runStateEl.textContent = `Laatste run: geslaagd (${processed} mails verwerkt)`;
+      runStateEl.textContent = `Laatste run (${taskLabel}): geslaagd`;
     }
     return;
   }
   if (status.success === false) {
-    runStateEl.textContent = `Laatste run: mislukt (exit ${status.exit_code})`;
+    runStateEl.textContent = `Laatste run (${taskLabel}): mislukt (exit ${status.exit_code})`;
     return;
   }
   runStateEl.textContent = "Niet gestart";
@@ -182,10 +200,23 @@ async function loadRunStatus() {
   const status = await response.json();
 
   runBtn.disabled = Boolean(status.running);
+  judgeBtn.disabled = Boolean(status.running);
   setRunStateText(status);
 
   if (logsVisible && (status.running || status.has_log)) {
     await loadLogs();
+  }
+
+  if (status.running) {
+    const processed = Number.isInteger(status.processed_items)
+      ? status.processed_items
+      : 0;
+    if (processed !== lastObservedProcessed) {
+      lastObservedProcessed = processed;
+      await loadItems();
+    }
+  } else {
+    lastObservedProcessed = null;
   }
 
   if (
@@ -203,6 +234,16 @@ async function startRun() {
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ error: "Onbekende fout" }));
     alert(payload.error || "Run starten mislukt");
+    return;
+  }
+  await loadRunStatus();
+}
+
+async function startJudge() {
+  const response = await fetch("/api/judge", { method: "POST" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ error: "Onbekende fout" }));
+    alert(payload.error || "Judge starten mislukt");
     return;
   }
   await loadRunStatus();
@@ -262,6 +303,12 @@ runBtn.addEventListener("click", () => {
   startRun().catch((error) => {
     console.error(error);
     runStateEl.textContent = "Run starten mislukt";
+  });
+});
+judgeBtn.addEventListener("click", () => {
+  startJudge().catch((error) => {
+    console.error(error);
+    runStateEl.textContent = "Judge starten mislukt";
   });
 });
 logsToggleBtn.addEventListener("click", toggleLogs);
