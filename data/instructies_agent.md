@@ -149,20 +149,23 @@ Na een reservatie kunnen nog emails volgen met de klant over zijn reservatie. Er
 1. Voortzetting van vorig mailgesprek
   - Typisch: De mail is een reactie/antwoord op vorige mail, al dan niet van een automatisch bericht van propop of andere medewerker. 
   - Nodig antwoord: Zorg steeds dat je rekening houdt met de context van alle voorgaande mails in het mailgesprek. Gebruik deze context om te bepalen hoe je moet reageren, en zorg dat je geen vragen stelt die eerder in het mailgesprek zijn beantwoord.
-2. Annulering van de reservatie.
+2. Sturen van ondertekend contract
+  - Typisch: De mail stuurt een ondertekend contract.
+  - Nodig antwoord: Meestal is een bevestiging voldoende. Als vragen worden gesteld over het contract, probeer te antwoorden op basis van de gegevens van de reservatie. Is dat niet mogelijk, dan moet een menselijke medewerker de mail beantwoorden.
+3. Annulering van de reservatie.
   - Typisch: Gebeurt vaak voor familievoorstellingen. Verwar dit niet met een wijziging van de reservatie (soms komt men nog steeds maar met minder kinderen of begeleiders).
   - Nodig antwoord: 
     - Nakijken in de reservatielijst of duidelijk is welke al bestaande reservatie bedoeld wordt (dus *wie* en *wanneer*). Indien niet helemaal duidelijk, via mail vraag naar de ontbrekende informatie (bv. contactgegevens of speeldatum)
     - Indien een reservatie gevonden wordt, via mail antwoord met bevestiging van de annulering.
   - Nodige andere acties: Indien annulatie, moet de bewuste reservatie van de reservatielijst worden geschrapt.
-3. Wijziging van de reservatie.
+4. Wijziging van de reservatie.
   - Typisch: Bij invullen van een reservatieformulier is een vergissing gemaakt in de gegeven informatie. Verbeterde gegevens worden via mail geleverd.
   - Nodig antwoord:
     - Nakijken in de reservatielijst of duidelijk is welke al bestaande reservatie bedoeld wordt (dus *wie* en *wanneer*). Indien niet helemaal duidelijk, via mail vraag naar de ontbrekende informatie (bv. contactgegevens of speeldatum)
     - Indien een reservatie gevonden wordt, nakijken of duidelijk is welke informatie moet worden gewijzigd. Indien niet helemaal duidelijk, via mail vraag om verduidelijking (bv. "Bedoelt u dat het aantal kinderen verandert naar 30, nog steeds voor een leeftijd van 10 jaar, met hetzelfde aantal van 10 volwassenen/begeleiders?").
     - Zodra het voorgaande duidelijk is, via mail antwoord met een korte bevestiging dat de reservatie zal worden gewijzigd. Benoem alleen welk(e) gegeven(s) wijzigen; herhaal niet de volledige reservatie.
   - Nodige andere acties: Indien gegevens duidelijk zijn en gewijzigd, wijzig de reservatie in de reservatielijst.
-4. Vraag om een nieuwe reservatie met onduidelijke of onvolledige gegevens.
+5. Vraag om een nieuwe reservatie met onduidelijke of onvolledige gegevens.
   - Typisch: Een reservatie komt binnen in de mailbox zonder de duidelijke structuur van het reservatieformulier, bv via de mailbox zelf, als reactie op de nieuwsbrief of via contactformulier. Er moet dan nagekeken worden of de reservatie duidelijk is en alle nodige gegevens zijn geleverd.
   - Nodig antwoord:    
     - Leid af uit het bericht welk *type voorstelling* men wil (*voorstelling op verplaatsing*, *familievoorstelling in de poppenzaal*, of *schoolvoorstelling in de poppenzaal*).
