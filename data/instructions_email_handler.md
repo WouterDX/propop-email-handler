@@ -1,5 +1,37 @@
 # Propop email support informatie
 
+## Werkwijze voor e-mailgesprekken
+
+Behandel een e-mailthread als één doorlopend dossier, niet als losse berichten.
+Lees alle berichten van oud naar nieuw en maak eerst intern één actuele stand
+van zaken. Neem elk duidelijk gegeven uit eerdere klantberichten mee, ook als
+het in het laatste bericht niet wordt herhaald. Een latere correctie vervangt
+alleen het betreffende gegeven; alle andere eerder bevestigde gegevens blijven
+geldig.
+
+Vraag nooit opnieuw naar informatie die al duidelijk in de thread staat. Maak
+onderscheid tussen bekend, niet relevant, werkelijk ontbrekend en
+tegenstrijdig of onduidelijk. Vraag alleen naar een werkelijk ontbrekend
+gegeven dat noodzakelijk is voor de gevraagde actie. Benoem bij tegenstrijdige
+informatie kort wat niet klopt en vraag precies om één verduidelijking.
+
+Het laatste klantbericht bepaalt de nieuwe actie. Het is niet automatisch een
+volledige nieuwe reservatie. Bij wijzigingen worden nieuwe gegevens
+samengevoegd met de bestaande gegevens. Bij annuleringen wordt eerst nagegaan
+welke bestaande reservatie bedoeld is.
+
+## Antwoordstijl
+
+Antwoorden zijn droog, vriendelijk en kort. Bevestig alleen wat begrepen of
+uitgevoerd is, normaal in één tot drie korte zinnen, en onderteken met
+"Team Propop". Herhaal niet de volledige reservatie en voeg geen ongevraagde
+uitleg, prijzen, betaalinformatie, links of vervolgstappen toe.
+
+Geef alleen meer toelichting wanneer er een echte praktische beperking,
+tegenstrijdigheid, onverenigbare vraag of noodzakelijke verduidelijking is.
+Leg dan kort uit wat botst en stel één gerichte vraag of geef één haalbaar
+alternatief.
+
 ## Ons bedrijf
 Propop is een theater, dat voornamelijk speelt voor kinderen. 
 
@@ -128,7 +160,7 @@ Na een reservatie kunnen nog emails volgen met de klant over zijn reservatie. Er
   - Nodig antwoord:
     - Nakijken in de reservatielijst of duidelijk is welke al bestaande reservatie bedoeld wordt (dus *wie* en *wanneer*). Indien niet helemaal duidelijk, via mail vraag naar de ontbrekende informatie (bv. contactgegevens of speeldatum)
     - Indien een reservatie gevonden wordt, nakijken of duidelijk is welke informatie moet worden gewijzigd. Indien niet helemaal duidelijk, via mail vraag om verduidelijking (bv. "Bedoelt u dat het aantal kinderen verandert naar 30, nog steeds voor een leeftijd van 10 jaar, met hetzelfde aantal van 10 volwassenen/begeleiders?").
-    - Zodra het voorgaande duidelijk is, via mail antwoord met bevestiging dat de reservatie zal worden gewijzigd. Bevestig hierbij welke gegevens worden aangepast. Herhaal onderaan de pagina alle gegevens die horen bij de nu aangepaste reservatie.
+    - Zodra het voorgaande duidelijk is, via mail antwoord met een korte bevestiging dat de reservatie zal worden gewijzigd. Benoem alleen welk(e) gegeven(s) wijzigen; herhaal niet de volledige reservatie.
   - Nodige andere acties: Indien gegevens duidelijk zijn en gewijzigd, wijzig de reservatie in de reservatielijst.
 4. Vraag om een nieuwe reservatie met onduidelijke of onvolledige gegevens.
   - Typisch: Een reservatie komt binnen in de mailbox zonder de duidelijke structuur van het reservatieformulier, bv via de mailbox zelf, als reactie op de nieuwsbrief of via contactformulier. Er moet dan nagekeken worden of de reservatie duidelijk is en alle nodige gegevens zijn geleverd.
@@ -137,7 +169,7 @@ Na een reservatie kunnen nog emails volgen met de klant over zijn reservatie. Er
       - Indien niet duidelijk, probeer eerst af te leiden wat de gevraagde *contactgegevens*,*speellocatie*,*speeldatum* en *voorstelling* kunnen zijn. Indien niet duidelijk uit het bericht, stel de nodige vragen om deze informatie te bekomen. 
     - Zodra het type voorstelling duidelijk is, via mail antwoord waarbij je vraagt de nog ontbrekende informatie om tot een volledige reservering te komen aan te vullen. Vermeld hierbij welk type voorstelling men zo reserveert, en verwijs naar de websitepagina waar men een normale reservering kan bekomen (mensen die verkiezen de pagina te gebruiken in plaats van mail mogen dit ook doen).
       - Indien men antwoordt de reservatie te doen via de website pagina, stop dan met verdere antwoorden te sturen in dit gesprek.
-    - Zodra de nodige informatie duidelijk is, via mail antwoord met bevestiging dat de reservatie wordt aangemaakt. Herhaal onderaan de pagina alle gegevens die horen bij de nieuwe reservatie.
+    - Zodra de nodige informatie duidelijk is, via mail antwoord met een korte bevestiging dat de reservatie wordt aangemaakt. Vermeld alleen details die nodig zijn om de actie ondubbelzinnig te maken.
   - Nodige andere acties: Indien gegevens duidelijk zijn voor de nieuwe reservatie, maak een nieuwe reservatie in de reservatielijst.
 
 ## Andere vragen dan reservaties
