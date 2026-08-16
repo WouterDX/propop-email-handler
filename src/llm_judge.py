@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
+import time
 from typing import Any
 
 import requests
@@ -18,14 +19,30 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+_JUDGE_MAX_ATTEMPTS = 2
+_JUDGE_RETRY_DELAY_SECONDS = 2.0
+
 
 def _extract_json(raw_text: str) -> dict[str, Any]:
     text = (raw_text or "").strip()
+    if not text:
+        raise ValueError(
+            "Judge returned empty content; the model produced no JSON response."
+        )
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:]
-    return json.loads(text.strip())
+    try:
+        parsed = json.loads(text.strip())
+    except json.JSONDecodeError as e:
+        preview = " ".join(text.split())[:300]
+        raise ValueError(
+            f"Judge returned invalid JSON ({e}); response preview: {preview!r}"
+        ) from e
+    if not isinstance(parsed, dict):
+        raise ValueError("Judge output is valid JSON but is not a JSON object.")
+    return parsed
 
 
 def _call_openrouter(messages: list[dict[str, str]]) -> str:
@@ -61,7 +78,7 @@ def _call_openrouter(messages: list[dict[str, str]]) -> str:
         raise RuntimeError(f"OpenRouter judge response has no choices: {data}")
     message = (choices[0] or {}).get("message") or {}
     content = message.get("content")
-    if content is None:
+    if content is None or (isinstance(content, str) and not content.strip()):
         raise RuntimeError("OpenRouter judge response has empty content.")
     if isinstance(content, str):
         return content
@@ -157,10 +174,27 @@ def _judge_single_reference(
         include_instruction_review=include_instruction_review,
         instructions_text=instructions_text,
     )
-    raw = _call_openrouter(messages)
-    parsed = _extract_json(raw)
-    if not isinstance(parsed, dict):
-        raise RuntimeError("Judge output is not a JSON object.")
+    last_error: Exception | None = None
+    for attempt in range(1, _JUDGE_MAX_ATTEMPTS + 1):
+        try:
+            raw = _call_openrouter(messages)
+            parsed = _extract_json(raw)
+            break
+        except (RuntimeError, ValueError, json.JSONDecodeError) as e:
+            last_error = e
+            if attempt >= _JUDGE_MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"Judge failed after {_JUDGE_MAX_ATTEMPTS} attempts: {e}"
+                ) from e
+            log.warning(
+                "Judge returned no usable JSON (attempt %d/%d): %s. Retrying...",
+                attempt,
+                _JUDGE_MAX_ATTEMPTS,
+                e,
+            )
+            time.sleep(_JUDGE_RETRY_DELAY_SECONDS)
+    else:
+        raise RuntimeError(f"Judge failed: {last_error}") from last_error
 
     parsed["review_id"] = reference.get("review_id")
     parsed["judged_at"] = datetime.now(timezone.utc).isoformat()
